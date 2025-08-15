@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = "build"
+
+# If you ever add client-side routes, this keeps refreshes working
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
