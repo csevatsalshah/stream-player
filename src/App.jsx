@@ -7,9 +7,10 @@ import { getYouTubeId, lsGet, lsSet, clamp } from './utils';
 const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
 const DEFAULT_L2_CHAT = 360;   // px
 const DEFAULT_L3_S2H  = 240;   // px
-const DEFAULT_L3_RIGHT_W = 360; // px (new: layout 3 right column width)
+const DEFAULT_L3_RIGHT_W = 360; // px (Layout 3 right column width)
 const METRICS_MS = 30000;      // 30s
-// env-based API key
+
+// YouTube Data API key (still from env)
 const YT_API_KEY = process.env.REACT_APP_YT_API_KEY || '';
 
 /* -------------- YouTube IFrame API ---------------- */
@@ -67,17 +68,19 @@ const DEFAULT_KEYMAP = {
   swap:'q',
   toggleShortcuts:'s',
   openSettings:'o',
-  focusAudio:'a',
+  focusAudio:'a',            // cycles S1 -> Both -> S2
   muteAll:'m',
   unmuteAll:'u',
   nudgeBack:'[',
   nudgeForward:']',
   toggleChat:'c',
   toggleInfo:'i',
-  chatWidthDec:',',
-  chatWidthInc:'.',
-  s2HeightDec:'ArrowDown',
-  s2HeightInc:'ArrowUp',
+  chatWidthDec:',',          // Layout 2 chat width -
+  chatWidthInc:'.',          // Layout 2 chat width +
+  s2HeightDec:'ArrowDown',   // Layout 3 S2 height -
+  s2HeightInc:'ArrowUp',     // Layout 3 S2 height +
+  l3RightDec:'-',            // NEW: Layout 3 – right column width -
+  l3RightInc:'=',            // NEW: Layout 3 – right column width +
   borderDec:'ArrowLeft',
   borderInc:'ArrowRight',
 };
@@ -95,8 +98,8 @@ const QUALITY_LABELS = {
   hd2160: '2160p (4K)',
   highres: 'Highest'
 };
-const PREFERRED_DEFAULT_QUALITY = 'hd1080'; // default setting
-
+const QUALITY_ORDER = ['default','small','medium','large','hd720','hd1080','hd1440','hd2160','highres'];
+const PREFERRED_DEFAULT_QUALITY = 'hd1080';
 const prettyQuality = (q) => QUALITY_LABELS[q] || q || 'Auto';
 
 /* Cursor helper for PIP */
@@ -123,12 +126,15 @@ export default function App() {
   const [swap, setSwap] = useState(() => lsGet('ms_swap',false));
   const [chatTab, setChatTab] = useState(() => lsGet('ms_chatTab',1));
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => lsGet('ms_shortcuts_enabled',true));
+
+  /* Hover visibility (top & bottom bars) */
   const [menuVisible, setMenuVisible] = useState(true);
+  const [controlsEnabled, setControlsEnabled] = useState(() => lsGet('ms_controls_enabled', true)); // toggle bottom controls
 
   /* Sizes */
   const [l2ChatWidth, setL2ChatWidth] = useState(() => lsGet('ms_l2_chat', DEFAULT_L2_CHAT));
   const [l3S2Height, setL3S2Height] = useState(() => lsGet('ms_l3_s2h', DEFAULT_L3_S2H));
-  const [l3RightWidth, setL3RightWidth] = useState(() => lsGet('ms_l3_right_w', DEFAULT_L3_RIGHT_W)); // NEW
+  const [l3RightWidth, setL3RightWidth] = useState(() => lsGet('ms_l3_right_w', DEFAULT_L3_RIGHT_W));
 
   /* PIP */
   const [pip, setPip] = useState(() => lsGet('ms_pip', DEFAULT_PIP));
@@ -140,7 +146,7 @@ export default function App() {
   const [bgUrl, setBgUrl] = useState(() => lsGet('ms_bg', ''));
   const [frameW, setFrameW] = useState(() => lsGet('ms_frame_w', 0));
   const [frameColor, setFrameColor] = useState(() => lsGet('ms_frame_c', '#ffffff'));
-  const [themes, setThemes] = useState(() => lsGet('ms_theme_presets', [])); // [{name, bgUrl, frameW, frameColor}]
+  const [themes, setThemes] = useState(() => lsGet('ms_theme_presets', []));
 
   /* Overlays */
   const [showMetrics, setShowMetrics] = useState(() => lsGet('ms_show_metrics', true));
@@ -149,8 +155,8 @@ export default function App() {
   /* Settings modal */
   const [showSettings, setShowSettings] = useState(false);
 
-  /* Bottom controls */
-  const [controlsVisible, setControlsVisible] = useState(() => lsGet('ms_controls_visible', true));
+  /* Chat / Sign-in (per-user Google Client ID stored locally) */
+  const [googleClientId, setGoogleClientId] = useState(() => lsGet('ms_gsi_client_id', ''));
 
   /* Geometry */
   const stageRef = useRef(null);
@@ -176,23 +182,23 @@ export default function App() {
   /* Keymap */
   const [keymap, setKeymap] = useState(() => ({ ...DEFAULT_KEYMAP, ...lsGet('ms_keymap', {}) }));
 
-  /* Audio focus */
-  const [focus, setFocus] = useState('both'); // 's1' | 's2' | 'both'
+  /* Audio */
+  const [focus, setFocus] = useState('both'); // 's1' | 'both' | 's2'
   const [vol1, setVol1] = useState(() => lsGet('ms_vol1', 100));
   const [vol2, setVol2] = useState(() => lsGet('ms_vol2', 100));
+  const [muted1, setMuted1] = useState(() => lsGet('ms_muted1', false));
+  const [muted2, setMuted2] = useState(() => lsGet('ms_muted2', false));
 
   /* Playback quality */
   const [defaultQuality, setDefaultQuality] = useState(() => lsGet('ms_default_quality', PREFERRED_DEFAULT_QUALITY));
   const [q1, setQ1] = useState(() => lsGet('ms_q1', 'default'));
   const [q2, setQ2] = useState(() => lsGet('ms_q2', 'default'));
-  const [qLevels1, setQLevels1] = useState([]);
-  const [qLevels2, setQLevels2] = useState([]);
 
   /* Info (metrics + title) */
   const info1 = useYouTubeInfo(s1, { metricsEnabled: showMetrics, titleEnabled: showTitles });
   const info2 = useYouTubeInfo(s2, { metricsEnabled: showMetrics, titleEnabled: showTitles });
 
-  /* Chat reload key (forces iframe refresh) */
+  /* Chat reload key */
   const [chatRefreshKey, setChatRefreshKey] = useState(0);
 
   /* ---- Boot: IFrame API ---- */
@@ -261,7 +267,7 @@ export default function App() {
   useEffect(()=>lsSet('ms_stream1', s1Input),[s1Input]);
   useEffect(()=>lsSet('ms_stream2', s2Input),[s2Input]);
   useEffect(()=>lsSet('ms_layout', layout),[layout]);
-  useEffect(()=>lsSet('ms_controls_visible', controlsVisible),[controlsVisible]);
+  useEffect(()=>lsSet('ms_controls_enabled', controlsEnabled),[controlsEnabled]);
   useEffect(()=>lsSet('ms_swap', swap),[swap]);
   useEffect(()=>lsSet('ms_chatTab', chatTab),[chatTab]);
   useEffect(()=>lsSet('ms_shortcuts_enabled', shortcutsEnabled),[shortcutsEnabled]);
@@ -280,11 +286,14 @@ export default function App() {
   useEffect(()=>lsSet('ms_s2_enabled', s2Enabled),[s2Enabled]);
   useEffect(()=>lsSet('ms_vol1', vol1),[vol1]);
   useEffect(()=>lsSet('ms_vol2', vol2),[vol2]);
+  useEffect(()=>lsSet('ms_muted1', muted1),[muted1]);
+  useEffect(()=>lsSet('ms_muted2', muted2),[muted2]);
   useEffect(()=>lsSet('ms_default_quality', defaultQuality),[defaultQuality]);
   useEffect(()=>lsSet('ms_q1', q1),[q1]);
   useEffect(()=>lsSet('ms_q2', q2),[q2]);
+  useEffect(()=>lsSet('ms_gsi_client_id', googleClientId),[googleClientId]);
 
-  /* ---- Auto-hide menu & settings btn ---- */
+  /* ---- Auto-hide menus (top & bottom) ---- */
   useEffect(() => {
     const a = stageRef.current || document.body; let t;
     const onMove = () => { setMenuVisible(true); clearTimeout(t); t = setTimeout(()=>setMenuVisible(false), 1800); };
@@ -352,7 +361,7 @@ export default function App() {
     window.history.replaceState(null, '', url);
   }, [s1, s2]);
 
-  /* ---- Player & chat sources ---- */
+  /* ---- Sources ---- */
   const baseParams = `autoplay=1&playsinline=1&mute=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
   const s1Src = (s1 && s1Enabled) ? `https://www.youtube.com/embed/${s1}?${baseParams}` : null;
   const s2Src = (s2 && s2Enabled) ? `https://www.youtube.com/embed/${s2}?${baseParams}` : null;
@@ -360,17 +369,28 @@ export default function App() {
   const chat1Src = s1 ? `https://www.youtube.com/live_chat?v=${s1}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
   const chat2Src = s2 ? `https://www.youtube.com/live_chat?v=${s2}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
 
-  /* ---- Audio focus & seek ---- */
-  const applyFocus = useCallback((f) => {
-    const a = yt1.current, b = yt2.current;
-    if (f === 's1') { a?.unMute(); b?.mute(); }
-    else if (f === 's2') { b?.unMute(); a?.mute(); }
-    else { a?.unMute(); b?.unMute(); }
-  }, []);
-  useEffect(() => { applyFocus(focus); }, [focus, applyFocus]);
+  /* ---- Unified audio apply (keeps shortcuts & UI in sync) ---- */
+  const applyAudioStates = useCallback(() => {
+    const effMute1 = muted1 || focus === 's2';
+    const effMute2 = muted2 || focus === 's1';
+    try {
+      if (yt1.current) {
+        if (effMute1) yt1.current.mute();
+        else { yt1.current.unMute(); yt1.current.setVolume(vol1); }
+      }
+    } catch {}
+    try {
+      if (yt2.current) {
+        if (effMute2) yt2.current.mute();
+        else { yt2.current.unMute(); yt2.current.setVolume(vol2); }
+      }
+    } catch {}
+  }, [muted1, muted2, focus, vol1, vol2]);
+  useEffect(() => { applyAudioStates(); }, [applyAudioStates]);
 
-  const muteAll = useCallback(() => { yt1.current?.mute(); yt2.current?.mute(); }, []);
-  const unmuteAll = useCallback(() => { yt1.current?.unMute(); yt2.current?.unMute(); }, []);
+  const muteAll = useCallback(() => { setMuted1(true); setMuted2(true); }, []);
+  const unmuteAll = useCallback(() => { setFocus('both'); setMuted1(false); setMuted2(false); }, []);
+
   const nudge = useCallback((delta) => {
     const list = focus === 's1' ? [yt1.current] : focus === 's2' ? [yt2.current] : [yt1.current, yt2.current];
     list.forEach((p) => {
@@ -379,23 +399,6 @@ export default function App() {
       p.seekTo(Math.max(0, t + delta), true);
     });
   }, [focus]);
-
-  /* Volumes apply */
-  useEffect(()=>{ if(yt1.current){ try{ yt1.current.setVolume(vol1); if(vol1===0) yt1.current.mute(); }catch{} } },[vol1]);
-  useEffect(()=>{ if(yt2.current){ try{ yt2.current.setVolume(vol2); if(vol2===0) yt2.current.mute(); }catch{} } },[vol2]);
-
-  /* Quality levels polling (when players exist) */
-  useEffect(() => {
-    const tm = setInterval(() => {
-      if (yt1.current?.getAvailableQualityLevels) setQLevels1(yt1.current.getAvailableQualityLevels());
-      if (yt2.current?.getAvailableQualityLevels) setQLevels2(yt2.current.getAvailableQualityLevels());
-    }, 2500);
-    return () => clearInterval(tm);
-  }, []);
-
-  /* Apply default quality immediately when default changes */
-  useEffect(()=>{ try{ yt1.current?.setPlaybackQuality(defaultQuality); }catch{} },[defaultQuality]);
-  useEffect(()=>{ try{ yt2.current?.setPlaybackQuality(defaultQuality); }catch{} },[defaultQuality]);
 
   /* ---- Key handling ---- */
   useEffect(() => {
@@ -412,7 +415,7 @@ export default function App() {
 
       if (norm(k) === norm(keymap.openSettings)) { stop(); setShowSettings(true); }
       else if (norm(k) === norm(keymap.swap)) { stop(); setSwap(v=>!v); }
-      else if (norm(k) === norm(keymap.focusAudio)) { stop(); setFocus(f=>f==='s1'?'s2':'s1'); }
+      else if (norm(k) === norm(keymap.focusAudio)) { stop(); setFocus(f => (f==='s1' ? 'both' : f==='both' ? 's2' : 's1')); }
       else if (norm(k) === norm(keymap.muteAll)) { stop(); muteAll(); }
       else if (norm(k) === norm(keymap.unmuteAll)) { stop(); unmuteAll(); }
       else if (norm(k) === norm(keymap.nudgeBack)) { stop(); nudge(-10); }
@@ -425,6 +428,8 @@ export default function App() {
       else if (norm(k) === norm(keymap.chatWidthInc)) { stop(); setL2ChatWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); }
       else if (k === keymap.s2HeightDec) { stop(); setL3S2Height(v=>clamp(v-12,120,800)); requestAnimationFrame(measureAll); }
       else if (k === keymap.s2HeightInc) { stop(); setL3S2Height(v=>clamp(v+12,120,800)); requestAnimationFrame(measureAll); }
+      else if (norm(k) === norm(keymap.l3RightDec)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); } }
+      else if (norm(k) === norm(keymap.l3RightInc)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); } }
       else if (k === keymap.borderDec) { stop(); setFrameW(v=>clamp(v-1,0,12)); }
       else if (k === keymap.borderInc) { stop(); setFrameW(v=>clamp(v+1,0,12)); }
       else if (norm(k) === norm(keymap.layout1)) setLayout(1);
@@ -514,7 +519,7 @@ export default function App() {
   };
   const resetKeymap = () => { setKeymap({ ...DEFAULT_KEYMAP }); toast('Keybinds reset'); };
 
-  /* ---- Chat helpers (Settings) ---- */
+  /* ---- Chat helpers ---- */
   const reloadChats = () => setChatRefreshKey(k => k + 1);
   function openYouTubeSignin() {
     window.open('https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&hl=en', '_blank', 'noopener,noreferrer');
@@ -525,6 +530,30 @@ export default function App() {
     else if (ua.includes('chrome/')) window.open('chrome://settings/cookies', '_blank') || window.open('chrome://settings/content/cookies', '_blank');
     else if (ua.includes('firefox/')) window.open('about:preferences#privacy', '_blank');
     else toast('Enable third‑party cookies for youtube.com and accounts.google.com in your browser settings, then reload chats.');
+  }
+  function googleSignIn() {
+    if (!googleClientId) { openYouTubeSignin(); return; }
+    const ensureScript = () => new Promise((resolve) => {
+      if (window.google && window.google.accounts && window.google.accounts.id) return resolve(true);
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true; s.defer = true;
+      s.onload = () => resolve(true);
+      document.head.appendChild(s);
+    });
+    ensureScript().then(() => {
+      try {
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: () => { toast('Google sign‑in completed'); reloadChats(); }
+        });
+        window.google.accounts.id.prompt((notification) => {
+          if (notification.isNotDisplayed()) openYouTubeSignin(); // fallback
+        });
+      } catch {
+        openYouTubeSignin();
+      }
+    });
   }
 
   /* ---- Theme helpers ---- */
@@ -615,7 +644,7 @@ export default function App() {
             )}
           </div>
 
-          {/* PIP layer (always above players & overlays) */}
+          {/* PIP layer */}
           <div className="pip-layer">
             {layout === 4 && (
               <Rnd
@@ -683,7 +712,7 @@ export default function App() {
 
           {/* UI layer: slots, chat, controls */}
           <div className="ui-layer">
-            {/* Interaction shield (prevents iframes from stealing events during drag/resize) */}
+            {/* Interaction shield to block iframes during drag/resize */}
             <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
 
             {/* Layout content (slots & chat holders) */}
@@ -695,7 +724,7 @@ export default function App() {
                   return (
                     <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
-                      <div /> {/* spacer */}
+                      <div />
                       <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
                     </div>
                   );
@@ -784,20 +813,20 @@ export default function App() {
               ))}
               <button onClick={()=>setSwap(v=>!v)} title="Swap streams">Swap (Q)</button>
               <button onClick={resetLayout} title="Reset splits & PIP">Reset</button>
-              <button onClick={()=>setControlsVisible(v=>!v)} className={controlsVisible?'active':''} title="Toggle bottom controls">Controls</button>
+              <button onClick={()=>setControlsEnabled(v=>!v)} className={controlsEnabled?'active':''} title="Toggle bottom controls">Controls</button>
               <button onClick={()=>setShowSettings(true)} title="Open settings">⚙️</button>
             </div>
 
-            {/* Bottom Controls Bar */}
-            {controlsVisible && (
+            {/* Bottom Controls Bar (auto‑hide with mouse like top bar) */}
+            {(controlsEnabled && menuVisible) && (
               <div className="bottom-controls">
                 <div className="bc-group">
                   <div className="bc-label">Audio</div>
                   <div className="bc-row">
                     <span>S1</span>
-                    <input type="range" min="0" max="100" value={vol1} onChange={e=>setVol1(Number(e.target.value))}/>
-                    <button className="btn" onClick={()=>{ try{ yt1.current?.mute(); }catch{} }}>Mute</button>
-                    <button className="btn" onClick={()=>{ try{ yt1.current?.unMute(); }catch{} }}>Unmute</button>
+                    <input type="range" min="0" max="100" value={vol1} onChange={e=>setVol1(Number(e.target.value))} disabled={!s1Enabled || !s1}/>
+                    <button className="btn" onClick={()=>setMuted1(true)} disabled={!s1Enabled || !s1}>Mute</button>
+                    <button className="btn" onClick={()=>setMuted1(false)} disabled={!s1Enabled || !s1}>Unmute</button>
                     <label className="switch">
                       <input type="checkbox" checked={s1Enabled} onChange={(e)=>setS1Enabled(e.target.checked)} />
                       <span>On</span>
@@ -805,9 +834,9 @@ export default function App() {
                   </div>
                   <div className="bc-row">
                     <span>S2</span>
-                    <input type="range" min="0" max="100" value={vol2} onChange={e=>setVol2(Number(e.target.value))}/>
-                    <button className="btn" onClick={()=>{ try{ yt2.current?.mute(); }catch{} }}>Mute</button>
-                    <button className="btn" onClick={()=>{ try{ yt2.current?.unMute(); }catch{} }}>Unmute</button>
+                    <input type="range" min="0" max="100" value={vol2} onChange={e=>setVol2(Number(e.target.value))} disabled={!s2Enabled || !s2}/>
+                    <button className="btn" onClick={()=>setMuted2(true)} disabled={!s2Enabled || !s2}>Mute</button>
+                    <button className="btn" onClick={()=>setMuted2(false)} disabled={!s2Enabled || !s2}>Unmute</button>
                     <label className="switch">
                       <input type="checkbox" checked={s2Enabled} onChange={(e)=>setS2Enabled(e.target.checked)} />
                       <span>On</span>
@@ -828,8 +857,9 @@ export default function App() {
                     <select
                       value={q1}
                       onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ yt1.current?.setPlaybackQuality(v);}catch{} }}
+                      disabled={!s1Enabled || !s1}
                     >
-                      {['default', ...qLevels1].map(q => <option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                      {QUALITY_ORDER.map(q => <option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>)}
                     </select>
                   </div>
                   <div className="bc-row">
@@ -837,8 +867,9 @@ export default function App() {
                     <select
                       value={q2}
                       onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ yt2.current?.setPlaybackQuality(v);}catch{} }}
+                      disabled={!s2Enabled || !s2}
                     >
-                      {['default', ...qLevels2].map(q => <option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                      {QUALITY_ORDER.map(q => <option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>)}
                     </select>
                   </div>
                 </div>
@@ -854,7 +885,7 @@ export default function App() {
                 <div className="bc-group">
                   <div className="bc-label">Chat</div>
                   <div className="bc-row">
-                    <button className="btn" onClick={openYouTubeSignin}>YouTube Sign‑in</button>
+                    <button className="btn" onClick={googleSignIn}>Sign in with Google</button>
                     <button className="btn" onClick={reloadChats}>Reload Chat</button>
                     <button className="btn" onClick={openCookieSettings}>Enable embedded chat</button>
                   </div>
@@ -905,8 +936,9 @@ export default function App() {
           keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
           // playback
           defaultQuality={defaultQuality} setDefaultQuality={setDefaultQuality}
-          // chat helpers
-          s1={s1} s2={s2}
+          // chat / sign-in
+          googleClientId={googleClientId} setGoogleClientId={setGoogleClientId}
+          googleSignIn={googleSignIn}
           openYouTubeSignin={openYouTubeSignin}
           reloadChats={reloadChats}
           openCookieSettings={openCookieSettings}
@@ -938,8 +970,8 @@ function SettingsModal(props){
     keymap, setKeymap, resetKeymap,
     // playback
     defaultQuality, setDefaultQuality,
-    // chat helpers
-    openYouTubeSignin, reloadChats, openCookieSettings,
+    // chat / sign-in
+    googleClientId, setGoogleClientId, googleSignIn, openYouTubeSignin, reloadChats, openCookieSettings,
     // enable flags
     s1Enabled, setS1Enabled, s2Enabled, setS2Enabled,
   } = props;
@@ -1092,7 +1124,7 @@ function SettingsModal(props){
             <div className="row">
               <div className="label">Default quality</div>
               <select className="field" value={defaultQuality} onChange={(e)=>setDefaultQuality(e.target.value)} style={{maxWidth:200}}>
-                {['default','small','medium','large','hd720','hd1080','hd1440','hd2160','highres'].map(q=>(
+                {QUALITY_ORDER.map(q=>(
                   <option key={q} value={q}>{prettyQuality(q)}</option>
                 ))}
               </select>
@@ -1103,10 +1135,13 @@ function SettingsModal(props){
           {/* Chat & Sign‑in */}
           <section className="settings-group">
             <h4>Chat & Sign‑in</h4>
-            <p className="muted">To chat inside the embedded panel, enable third‑party cookies (or add exceptions) for <b>youtube.com</b> and <b>accounts.google.com</b>, and sign‑in to YouTube in this browser.</p>
+            <p className="muted">Embedded chat requires allowing third‑party cookies for <b>youtube.com</b> and <b>accounts.google.com</b>.</p>
+            <label>Google OAuth Client ID (optional — per user)</label>
+            <input className="field" value={googleClientId} onChange={(e)=>setGoogleClientId(e.target.value)} placeholder="xxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
             <div className="row gap">
-              <button className="btn" onClick={openCookieSettings} title="Open your browser’s cookie settings">Enable embedded chat</button>
+              <button className="btn" onClick={googleSignIn}>Sign in with Google</button>
               <button className="btn" onClick={openYouTubeSignin}>Open YouTube Sign‑in</button>
+              <button className="btn" onClick={openCookieSettings}>Browser cookie settings</button>
               <button className="btn" onClick={reloadChats}>Reload chat embeds</button>
             </div>
           </section>
@@ -1123,7 +1158,9 @@ function SettingsModal(props){
                 ['focusAudio','Focus Audio'],['muteAll','Mute All'],['unmuteAll','Unmute All'],
                 ['nudgeBack','Seek −10s'],['nudgeForward','Seek +10s'],['toggleChat','Toggle Chat (Layout 3)'],
                 ['toggleInfo','Toggle Titles + Metrics'],['chatWidthDec','Chat width −'],['chatWidthInc','Chat width +'],
-                ['s2HeightDec','S2 height −'],['s2HeightInc','S2 height +'],['borderDec','Border −'],['borderInc','Border +'],
+                ['s2HeightDec','S2 height −'],['s2HeightInc','S2 height +'],
+                ['l3RightDec','Layout 3 Right width −'],['l3RightInc','Layout 3 Right width +'],
+                ['borderDec','Border −'],['borderInc','Border +'],
               ].map(([id,label])=>{
                 const val = keymap[id] || '';
                 const dup = val && (Array.from(Object.values(keymap)).filter(v => (v||'').toLowerCase() === val.toLowerCase()).length > 1);
