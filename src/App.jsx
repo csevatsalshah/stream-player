@@ -8,8 +8,8 @@ const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
 const DEFAULT_L2_CHAT = 360;   // px
 const DEFAULT_L3_S2H  = 240;   // px
 const METRICS_MS = 30000;      // 30s
+// env-based API key
 const YT_API_KEY = process.env.REACT_APP_YT_API_KEY || '';
-
 
 /* -------------- YouTube IFrame API ---------------- */
 function loadYouTubeAPI() {
@@ -82,7 +82,7 @@ const DEFAULT_KEYMAP = {
 };
 const norm = (k) => (k || '').toLowerCase();
 
-/* Map RND resize direction -> cursor */
+/* Simple cursor helper */
 const cursorForDir = (dir) => ({
   top: 'n-resize', bottom:'s-resize', left:'w-resize', right:'e-resize',
   topRight:'ne-resize', topLeft:'nw-resize', bottomRight:'se-resize', bottomLeft:'sw-resize',
@@ -104,7 +104,7 @@ export default function App() {
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => lsGet('ms_shortcuts_enabled',true));
   const [menuVisible, setMenuVisible] = useState(true);
 
-  /* Sizes (Settings sliders) */
+  /* Sizes */
   const [l2ChatWidth, setL2ChatWidth] = useState(() => lsGet('ms_l2_chat', DEFAULT_L2_CHAT));
   const [l3S2Height, setL3S2Height] = useState(() => lsGet('ms_l3_s2h', DEFAULT_L3_S2H));
 
@@ -223,7 +223,7 @@ export default function App() {
       return { left: Math.round(r.left - base.left), top: Math.round(r.top - base.top), width: w, height: h };
     };
     const r1 = toLocal(slotS1.current);
-    const r2 = layout === 4 ? null : toLocal(slotS2.current);
+    const r2 = layout === 4 ? null : toLocal(slotS2.current); // L4 uses PIP rect
     const rc = toLocal(chatSlot.current);
 
     setRectS1(r1); if (r1) lastS1.current = r1;
@@ -412,37 +412,18 @@ export default function App() {
 
   /* ---- Chat helpers (Settings) ---- */
   const reloadChats = () => setChatRefreshKey(k => k + 1);
-  const chatPopoutUrl = (id) => id ? `https://www.youtube.com/live_chat?v=${id}&is_popout=1` : null;
-
-  async function requestCookieAccess() {
-    try {
-      // Newer API: request for a specific third‑party origin (if supported by the browser)
-      if (typeof document.requestStorageAccessFor === 'function') {
-        await document.requestStorageAccessFor('https://www.youtube.com');
-        await document.requestStorageAccessFor('https://accounts.google.com');
-        toast('Requested cookie access for YouTube. Reloading chat…');
-        reloadChats();
-        return;
-      }
-      // Older API: only callable from third‑party iframe contexts; here we can only advise the user
-      if (typeof document.hasStorageAccess === 'function') {
-        const has = await document.hasStorageAccess();
-        if (!has) {
-          toast('Your browser blocked third‑party cookies. Sign‑in and then reload chat.');
-        } else {
-          reloadChats();
-        }
-        return;
-      }
-      toast('Storage Access API not available. Use "Open YouTube Sign‑in" below, then reload chat.');
-    } catch (err) {
-      toast(`Request failed: ${err?.message || String(err)}`);
-    }
-  }
   function openYouTubeSignin() {
     window.open('https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&hl=en', '_blank', 'noopener,noreferrer');
   }
-  function openPopout(id){ const u = chatPopoutUrl(id); if (u) window.open(u, '_blank', 'noopener,noreferrer'); }
+  function openPopout(id){ const u = id ? `https://www.youtube.com/live_chat?v=${id}&is_popout=1` : null; if (u) window.open(u, '_blank', 'noopener,noreferrer'); }
+  function openCookieSettings() {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    // try best-known settings pages per browser
+    if (ua.includes('edg/')) window.open('edge://settings/content/cookies', '_blank');
+    else if (ua.includes('chrome/')) window.open('chrome://settings/cookies', '_blank') || window.open('chrome://settings/content/cookies', '_blank');
+    else if (ua.includes('firefox/')) window.open('about:preferences#privacy', '_blank');
+    else toast('Enable third‑party cookies for youtube.com and accounts.google.com in your browser settings, then reload chats.');
+  }
 
   /* ---- Render ---- */
   return (
@@ -477,7 +458,7 @@ export default function App() {
             backgroundImage: bgUrl ? `url(${bgUrl})` : undefined
           }}
         >
-          {/* Players (never remount) */}
+          {/* Players */}
           <div className="players-layer">
             {s1Src && (
               <iframe
@@ -511,7 +492,51 @@ export default function App() {
             )}
           </div>
 
-          {/* Overlays: title then metrics */}
+          {/* PIP layer (always above players & overlays) */}
+          <div className="pip-layer">
+            {layout === 4 && (
+              <Rnd
+                className="pip-overlay"
+                size={{ width: pip.width, height: pip.height }}
+                position={{ x: pip.x, y: pip.y }}
+                bounds=".stage"
+                minWidth={220}
+                minHeight={124}
+                dragHandleClassName="pip-drag-handle"
+                enableResizing={{
+                  top:true, right:true, bottom:true, left:true,
+                  topRight:true, bottomRight:true, bottomLeft:true, topLeft:true
+                }}
+                resizeHandleComponent={{
+                  top:<div className="pip-handle pip-h-n" />,
+                  right:<div className="pip-handle pip-h-e" />,
+                  bottom:<div className="pip-handle pip-h-s" />,
+                  left:<div className="pip-handle pip-h-w" />,
+                  topRight:<div className="pip-handle pip-h-ne" />,
+                  bottomRight:<div className="pip-handle pip-h-se" />,
+                  bottomLeft:<div className="pip-handle pip-h-sw" />,
+                  topLeft:<div className="pip-handle pip-h-nw" />,
+                }}
+                lockAspectRatio={pipLockAR ? 16/9 : false}
+                onDragStart={() => { setPipMoving(true); setShield({active:true, cursor:'grabbing'}); }}
+                onResizeStart={(e, dir) => { setPipMoving(true); setPipLockAR(!!e?.shiftKey); setShield({active:true, cursor:cursorForDir(dir)}); }}
+                onDrag={(e, d) => setPip(p=>({ ...p, x:d.x, y:d.y }))}
+                onResize={(e, dir, ref, delta, pos) =>
+                  setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) })
+                }
+                onDragStop={(e, d) => { setPip(p=>({ ...p, x:d.x, y:d.y })); setPipMoving(false); setShield({active:false, cursor:'default'}); }}
+                onResizeStop={(e, dir, ref, delta, pos) =>
+                  { setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) }); setPipMoving(false); setShield({active:false, cursor:'default'}); }
+                }
+              >
+                <div className="pip-box">
+                  <div className="pip-drag-handle" title="Drag PIP">⋮⋮ Drag</div>
+                </div>
+              </Rnd>
+            )}
+          </div>
+
+          {/* Overlays */}
           <div className="metrics-layer">
             {s1Style.visibility==='visible' && showTitles && info1.title && (
               <div className="title-badge" style={{ left: s1Style.left + 10, top: s1Style.top + 10 }}>{info1.title}</div>
@@ -538,7 +563,7 @@ export default function App() {
             {/* Interaction shield (prevents iframes from stealing events during drag/resize) */}
             <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
 
-            {/* Layout content */}
+            {/* Layout content (slots & chat holders) */}
             {(() => {
               switch (layout) {
                 case 1:
@@ -575,45 +600,6 @@ export default function App() {
                   return (
                     <div className="layout layout-4">
                       <div className="slot slot-s1" ref={slotS1} />
-                      <Rnd
-                        className="pip-overlay"
-                        style={{ pointerEvents:'auto', zIndex: 6 }}
-                        size={{ width: pip.width, height: pip.height }}
-                        position={{ x: pip.x, y: pip.y }}
-                        bounds=".stage"
-                        minWidth={220}
-                        minHeight={124}
-                        dragHandleClassName="pip-drag-handle"
-                        enableResizing={{
-                          top:true, right:true, bottom:true, left:true,
-                          topRight:true, bottomRight:true, bottomLeft:true, topLeft:true
-                        }}
-                        resizeHandleStyles={{
-                          top:{ height:'12px', top:'-6px', left:0, right:0 },
-                          bottom:{ height:'12px', bottom:'-6px', left:0, right:0 },
-                          left:{ width:'12px', left:'-6px', top:0, bottom:0 },
-                          right:{ width:'12px', right:'-6px', top:0, bottom:0 },
-                          topLeft:{ width:'18px', height:'18px', left:'-9px', top:'-9px' },
-                          topRight:{ width:'18px', height:'18px', right:'-9px', top:'-9px' },
-                          bottomLeft:{ width:'18px', height:'18px', left:'-9px', bottom:'-9px' },
-                          bottomRight:{ width:'18px', height:'18px', right:'-9px', bottom:'-9px' },
-                        }}
-                        lockAspectRatio={pipLockAR ? 16/9 : false}
-                        onDragStart={() => { setPipMoving(true); setShield({active:true, cursor:'grabbing'}); }}
-                        onResizeStart={(e, dir) => { setPipMoving(true); setPipLockAR(!!e?.shiftKey); setShield({active:true, cursor:cursorForDir(dir)}); }}
-                        onDrag={(e, d) => setPip(p=>({ ...p, x:d.x, y:d.y }))}
-                        onResize={(e, dir, ref, delta, pos) =>
-                          setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) })
-                        }
-                        onDragStop={(e, d) => { setPip(p=>({ ...p, x:d.x, y:d.y })); setPipMoving(false); setShield({active:false, cursor:'default'}); }}
-                        onResizeStop={(e, dir, ref, delta, pos) =>
-                          { setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) }); setPipMoving(false); setShield({active:false, cursor:'default'}); }
-                        }
-                      >
-                        <div className="pip-box">
-                          <div className="pip-drag-handle" title="Drag PIP">⋮⋮ Drag</div>
-                        </div>
-                      </Rnd>
                     </div>
                   );
                 case 5:
@@ -652,6 +638,7 @@ export default function App() {
                   title="Stream 1 Chat"
                   src={chat1Src}
                   allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
+                  referrerPolicy="origin-when-cross-origin"
                   style={styleFromRect(rectChat, lastChat, true)}
                 />
               )}
@@ -661,6 +648,7 @@ export default function App() {
                   title="Stream 2 Chat"
                   src={chat2Src}
                   allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
+                  referrerPolicy="origin-when-cross-origin"
                   style={styleFromRect(rectChat, lastChat, true)}
                 />
               )}
@@ -718,10 +706,10 @@ export default function App() {
           keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
           // chat helpers
           s1={s1} s2={s2}
-          requestCookieAccess={requestCookieAccess}
           openYouTubeSignin={openYouTubeSignin}
-          openPopout={openPopout}
           reloadChats={reloadChats}
+          openPopout={openPopout}
+          openCookieSettings={openCookieSettings}
         />
       )}
     </div>
@@ -745,7 +733,7 @@ function SettingsModal(props){
     // keymap
     keymap, setKeymap, resetKeymap,
     // chat helpers
-    s1, s2, requestCookieAccess, openYouTubeSignin, openPopout, reloadChats,
+    s1, s2, openYouTubeSignin, reloadChats, openPopout, openCookieSettings,
   } = props;
 
   const keyCount = useMemo(() => {
@@ -860,9 +848,9 @@ function SettingsModal(props){
           {/* Chat & Sign‑in */}
           <section className="settings-group">
             <h4>Chat & Sign‑in</h4>
-            <p className="muted">To chat inside the embedded panel, your browser needs to allow YouTube’s cookies in iframes and your YouTube account must be signed‑in in this browser.</p>
+            <p className="muted">To chat inside the embedded panel, enable third‑party cookies (or add exceptions) for <b>youtube.com</b> and <b>accounts.google.com</b>, and sign‑in to YouTube in this browser.</p>
             <div className="row gap">
-              <button className="btn" onClick={requestCookieAccess} title="Use Storage Access API when available">Grant cookie access</button>
+              <button className="btn" onClick={openCookieSettings} title="Open your browser’s cookie settings">Enable embedded chat</button>
               <button className="btn" onClick={openYouTubeSignin}>Open YouTube Sign‑in</button>
               <button className="btn" onClick={reloadChats}>Reload chat embeds</button>
             </div>

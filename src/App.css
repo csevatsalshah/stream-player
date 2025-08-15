@@ -21,6 +21,8 @@ body{margin:0;background:#0b0d12;color:#e5e7eb;font-family:Inter,system-ui,ui-sa
 
 /* Layers */
 .players-layer{position:absolute;inset:0;z-index:1}
+.pip-layer{position:absolute;inset:0;z-index:5;pointer-events:none} /* RND will re-enable pointer-events on itself */
+.metrics-layer{position:absolute;inset:0;z-index:3;pointer-events:none}
 .ui-layer{position:relative;z-index:4;width:100%;height:100%;pointer-events:none}
 .chat-layer{position:absolute;inset:0;z-index:2;pointer-events:none}
 .chat-frame-abs{
@@ -41,7 +43,6 @@ body{margin:0;background:#0b0d12;color:#e5e7eb;font-family:Inter,system-ui,ui-sa
 .player.no-anim{transition:none !important}
 
 /* Overlays */
-.metrics-layer{position:absolute;inset:0;z-index:3;pointer-events:none}
 .metric-badge{position:absolute;display:flex;gap:8px;background:rgba(0,0,0,.55);color:#fff;border-radius:999px;padding:6px 10px;font-weight:700;font-size:12px;box-shadow:0 6px 16px rgba(0,0,0,.3)}
 .title-badge{position:absolute;max-width:40vw;background:rgba(0,0,0,.55);color:#fff;border-radius:10px;padding:6px 10px;font-weight:700;font-size:12px;box-shadow:0 6px 16px rgba(0,0,0,.3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
@@ -99,14 +100,13 @@ label{font-size:13px;color:#d1d5db}
 .layout-4{position:relative;width:100%;height:100%}
 .layout-4 .slot-s1{position:absolute;inset:0}
 
-/* Ensure RND overlay is interactive even though ui-layer uses pointer-events:none */
-.pip-overlay{position:absolute;z-index:5;pointer-events:auto}
+.pip-overlay{position:absolute;z-index:6;pointer-events:auto}
 .pip-box{
   width:100%;height:100%;
   border:1px solid rgba(255,255,255,.9);
   border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);
   background:transparent;position:relative;
-  pointer-events:none;
+  pointer-events:none; /* only handles + drag handle take events */
 }
 .pip-drag-handle{
   position:absolute;left:50%;transform:translateX(-50%);top:6px;
@@ -114,16 +114,17 @@ label{font-size:13px;color:#d1d5db}
   background:rgba(0,0,0,.6);color:#fff;border-radius:999px;padding:0 10px;font-weight:700;
   cursor:move;pointer-events:auto;user-select:none
 }
-/* Make resize grips easier to grab + keep above everything */
-.pip-overlay .react-rnd-resize-handle{pointer-events:auto;width:18px;height:18px;z-index:20}
-.pip-overlay .react-rnd-resize-handle-se{cursor:se-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
-.pip-overlay .react-rnd-resize-handle-ne{cursor:ne-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
-.pip-overlay .react-rnd-resize-handle-sw{cursor:sw-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
-.pip-overlay .react-rnd-resize-handle-nw{cursor:nw-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
-.pip-overlay .react-rnd-resize-handle-n{cursor:n-resize}
-.pip-overlay .react-rnd-resize-handle-s{cursor:s-resize}
-.pip-overlay .react-rnd-resize-handle-e{cursor:e-resize}
-.pip-overlay .react-rnd-resize-handle-w{cursor:w-resize}
+
+/* Custom handles for RND */
+.pip-handle{position:absolute;pointer-events:auto;z-index:20;background:rgba(255,255,255,0.001)} /* invisible but clickable */
+.pip-h-n{left:0;right:0;top:-6px;height:12px;cursor:n-resize}
+.pip-h-s{left:0;right:0;bottom:-6px;height:12px;cursor:s-resize}
+.pip-h-e{top:0;bottom:0;right:-6px;width:12px;cursor:e-resize}
+.pip-h-w{top:0;bottom:0;left:-6px;width:12px;cursor:w-resize}
+.pip-h-ne{top:-9px;right:-9px;width:18px;height:18px;border:2px solid rgba(255,255,255,.85);border-radius:3px;cursor:ne-resize}
+.pip-h-se{bottom:-9px;right:-9px;width:18px;height:18px;border:2px solid rgba(255,255,255,.85);border-radius:3px;cursor:se-resize}
+.pip-h-sw{bottom:-9px;left:-9px;width:18px;height:18px;border:2px solid rgba(255,255,255,.85);border-radius:3px;cursor:sw-resize}
+.pip-h-nw{top:-9px;left:-9px;width:18px;height:18px;border:2px solid rgba(255,255,255,.85);border-radius:3px;cursor:nw-resize}
 
 /* Shield to block iframes while resizing/dragging */
 .interaction-shield{
