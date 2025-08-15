@@ -5,13 +5,13 @@ import { getYouTubeId, lsGet, lsSet, clamp } from './utils';
 
 /* -------------------- Tunables -------------------- */
 const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
-const DEFAULT_L2_CHAT = 360;   // px
-const DEFAULT_L3_S2H  = 240;   // px
-const DEFAULT_L3_RIGHT_W = 360; // px (Layout 3 right column width)
-const METRICS_MS = 30000;      // 30s
+const DEFAULT_L2_CHAT = 360;         // px
+const DEFAULT_L3_S2H  = 240;         // px (Layout 3 top stream height)
+const DEFAULT_L3_RIGHT_W = 360;      // px (Layout 3 right column width: S2 + Chat)
+const METRICS_MS = 30000;            // 30s
 
-// YouTube Data API key (still from env)
-const YT_API_KEY = process.env.REACT_APP_YT_API_KEY || '';
+// Default API key comes from env, but can be overridden per-user in settings
+const YT_API_KEY_DEFAULT = process.env.REACT_APP_YT_API_KEY || '';
 
 /* -------------- YouTube IFrame API ---------------- */
 function loadYouTubeAPI() {
@@ -25,7 +25,7 @@ function loadYouTubeAPI() {
 }
 
 /* -------- YouTube info (metrics + title) ---------- */
-function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled }) {
+function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
   const [data, setData] = useState({ viewers: null, likes: null, title: '' });
 
   useEffect(() => {
@@ -38,8 +38,7 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled }) {
         if (metricsEnabled) parts.push('liveStreamingDetails', 'statistics');
         if (titleEnabled)   parts.push('snippet');
         const part = Array.from(new Set(parts)).join(',');
-        const url =
-          `https://www.googleapis.com/youtube/v3/videos?part=${part}&id=${videoId}&key=${YT_API_KEY}`;
+        const url = `https://www.googleapis.com/youtube/v3/videos?part=${part}&id=${videoId}&key=${apiKey}`;
         const res = await fetch(url);
         const j = await res.json();
         const it = j?.items?.[0];
@@ -57,7 +56,7 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled }) {
     fetchOnce();
     if (metricsEnabled) timer = setInterval(fetchOnce, METRICS_MS);
     return () => { if (timer) clearInterval(timer); };
-  }, [videoId, metricsEnabled, titleEnabled]);
+  }, [videoId, metricsEnabled, titleEnabled, apiKey]);
 
   return data;
 }
@@ -79,8 +78,8 @@ const DEFAULT_KEYMAP = {
   chatWidthInc:'.',          // Layout 2 chat width +
   s2HeightDec:'ArrowDown',   // Layout 3 S2 height -
   s2HeightInc:'ArrowUp',     // Layout 3 S2 height +
-  l3RightDec:'-',            // NEW: Layout 3 – right column width -
-  l3RightInc:'=',            // NEW: Layout 3 – right column width +
+  l3RightDec:'-',            // Layout 3 – right column width -
+  l3RightInc:'=',            // Layout 3 – right column width +
   borderDec:'ArrowLeft',
   borderInc:'ArrowRight',
 };
@@ -117,7 +116,7 @@ export default function App() {
   const [s1, setS1] = useState(() => getYouTubeId(lsGet('ms_stream1','')));
   const [s2, setS2] = useState(() => getYouTubeId(lsGet('ms_stream2','')));
 
-  /* Stream enabled flags (turning OFF stops background playback) */
+  /* Stream enabled flags (turning OFF destroys the player) */
   const [s1Enabled, setS1Enabled] = useState(() => lsGet('ms_s1_enabled', true));
   const [s2Enabled, setS2Enabled] = useState(() => lsGet('ms_s2_enabled', true));
 
@@ -155,8 +154,11 @@ export default function App() {
   /* Settings modal */
   const [showSettings, setShowSettings] = useState(false);
 
-  /* Chat / Sign-in (per-user Google Client ID stored locally) */
+  /* Chat / Sign‑in (per‑user settings) */
   const [googleClientId, setGoogleClientId] = useState(() => lsGet('ms_gsi_client_id', ''));
+  const [ytApiKeyOverride, setYtApiKeyOverride] = useState(() => lsGet('ms_yt_api_key', ''));
+  const ytApiKey = ytApiKeyOverride || YT_API_KEY_DEFAULT;
+  const [chatHelp, setChatHelp] = useState(() => lsGet('ms_chat_help', true));
 
   /* Geometry */
   const stageRef = useRef(null);
@@ -195,8 +197,8 @@ export default function App() {
   const [q2, setQ2] = useState(() => lsGet('ms_q2', 'default'));
 
   /* Info (metrics + title) */
-  const info1 = useYouTubeInfo(s1, { metricsEnabled: showMetrics, titleEnabled: showTitles });
-  const info2 = useYouTubeInfo(s2, { metricsEnabled: showMetrics, titleEnabled: showTitles });
+  const info1 = useYouTubeInfo(s1, { metricsEnabled: showMetrics, titleEnabled: showTitles, apiKey: ytApiKey });
+  const info2 = useYouTubeInfo(s2, { metricsEnabled: showMetrics, titleEnabled: showTitles, apiKey: ytApiKey });
 
   /* Chat reload key */
   const [chatRefreshKey, setChatRefreshKey] = useState(0);
@@ -292,6 +294,8 @@ export default function App() {
   useEffect(()=>lsSet('ms_q1', q1),[q1]);
   useEffect(()=>lsSet('ms_q2', q2),[q2]);
   useEffect(()=>lsSet('ms_gsi_client_id', googleClientId),[googleClientId]);
+  useEffect(()=>lsSet('ms_yt_api_key', ytApiKeyOverride),[ytApiKeyOverride]);
+  useEffect(()=>lsSet('ms_chat_help', chatHelp),[chatHelp]);
 
   /* ---- Auto-hide menus (top & bottom) ---- */
   useEffect(() => {
@@ -369,7 +373,7 @@ export default function App() {
   const chat1Src = s1 ? `https://www.youtube.com/live_chat?v=${s1}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
   const chat2Src = s2 ? `https://www.youtube.com/live_chat?v=${s2}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
 
-  /* ---- Unified audio apply (keeps shortcuts & UI in sync) ---- */
+  /* ---- Unified audio apply (hotkeys + UI in sync) ---- */
   const applyAudioStates = useCallback(() => {
     const effMute1 = muted1 || focus === 's2';
     const effMute2 = muted2 || focus === 's1';
@@ -404,7 +408,14 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
+      const type = (e.target?.type || '').toLowerCase();
+      const isKeybindField = e.target?.classList?.contains('key-input');
+      const isTypingContext =
+        tag === 'textarea' ||
+        (tag === 'input' && !['range','checkbox','color','button','submit'].includes(type)) ||
+        isKeybindField;
+      if (isTypingContext) return; // but sliders/buttons won't block shortcuts
+
       const k = e.key;
 
       // Always allow toggling shortcuts
@@ -548,7 +559,7 @@ export default function App() {
           callback: () => { toast('Google sign‑in completed'); reloadChats(); }
         });
         window.google.accounts.id.prompt((notification) => {
-          if (notification.isNotDisplayed()) openYouTubeSignin(); // fallback
+          if (notification.isNotDisplayed()) openYouTubeSignin(); // fallback to top-level login
         });
       } catch {
         openYouTubeSignin();
@@ -724,7 +735,7 @@ export default function App() {
                   return (
                     <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
-                      <div />
+                      <div /> {/* spacer */}
                       <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
                     </div>
                   );
@@ -805,6 +816,28 @@ export default function App() {
                 />
               )}
             </div>
+
+            {/* Chat Helper overlay (visible area + sign-in guidance) */}
+            {(layout===2 || layout===3) && (
+              <div
+                className={`chat-helper-abs ${chatHelp ? 'show' : 'hide'}`}
+                style={styleFromRect(rectChat, lastChat, true)}
+              >
+                <div className="chat-helper-card">
+                  <div className="ch-title">Chat here</div>
+                  <div className="ch-body">
+                    <p>If you don’t see the message box below, sign in and allow third‑party cookies for YouTube.</p>
+                    <div className="ch-actions">
+                      <button className="btn" onClick={googleSignIn}>Sign in with Google</button>
+                      <button className="btn" onClick={openYouTubeSignin}>Open YouTube Sign‑in</button>
+                      <button className="btn" onClick={openCookieSettings}>Cookie settings</button>
+                      <button className="btn" onClick={reloadChats}>Reload chat</button>
+                    </div>
+                  </div>
+                  <button className="ch-close" onClick={()=>setChatHelp(false)}>✕</button>
+                </div>
+              </div>
+            )}
 
             {/* Top center: layout buttons */}
             <div className={`layout-menu ${menuVisible ? 'visible' : ''}`}>
@@ -936,8 +969,9 @@ export default function App() {
           keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
           // playback
           defaultQuality={defaultQuality} setDefaultQuality={setDefaultQuality}
-          // chat / sign-in
+          // chat / sign-in + API key
           googleClientId={googleClientId} setGoogleClientId={setGoogleClientId}
+          ytApiKeyOverride={ytApiKeyOverride} setYtApiKeyOverride={setYtApiKeyOverride}
           googleSignIn={googleSignIn}
           openYouTubeSignin={openYouTubeSignin}
           reloadChats={reloadChats}
@@ -945,6 +979,8 @@ export default function App() {
           // enable flags
           s1Enabled={s1Enabled} setS1Enabled={setS1Enabled}
           s2Enabled={s2Enabled} setS2Enabled={setS2Enabled}
+          // chat helper
+          chatHelp={chatHelp} setChatHelp={setChatHelp}
         />
       )}
     </div>
@@ -970,10 +1006,13 @@ function SettingsModal(props){
     keymap, setKeymap, resetKeymap,
     // playback
     defaultQuality, setDefaultQuality,
-    // chat / sign-in
-    googleClientId, setGoogleClientId, googleSignIn, openYouTubeSignin, reloadChats, openCookieSettings,
+    // chat / sign-in + API
+    googleClientId, setGoogleClientId, ytApiKeyOverride, setYtApiKeyOverride,
+    googleSignIn, openYouTubeSignin, reloadChats, openCookieSettings,
     // enable flags
     s1Enabled, setS1Enabled, s2Enabled, setS2Enabled,
+    // chat helper
+    chatHelp, setChatHelp,
   } = props;
 
   const keyCount = useMemo(() => {
@@ -1124,25 +1163,27 @@ function SettingsModal(props){
             <div className="row">
               <div className="label">Default quality</div>
               <select className="field" value={defaultQuality} onChange={(e)=>setDefaultQuality(e.target.value)} style={{maxWidth:200}}>
-                {QUALITY_ORDER.map(q=>(
-                  <option key={q} value={q}>{prettyQuality(q)}</option>
-                ))}
+                {['default','hd720','hd1080','hd1440','hd2160','highres','large','medium','small']
+                  .map(q=>(<option key={q} value={q}>{prettyQuality(q)}</option>))}
               </select>
             </div>
             <p className="muted">We request the selected quality from YouTube. If that rendition isn’t available, YouTube may pick the closest available.</p>
           </section>
 
-          {/* Chat & Sign‑in */}
+          {/* Chat & Sign‑in + API keys */}
           <section className="settings-group">
             <h4>Chat & Sign‑in</h4>
             <p className="muted">Embedded chat requires allowing third‑party cookies for <b>youtube.com</b> and <b>accounts.google.com</b>.</p>
-            <label>Google OAuth Client ID (optional — per user)</label>
+            <label>Google OAuth Client ID (per user)</label>
             <input className="field" value={googleClientId} onChange={(e)=>setGoogleClientId(e.target.value)} placeholder="xxxxxxxxxxxxxxxx.apps.googleusercontent.com" />
+            <label>YouTube Data API v3 Key (per user override)</label>
+            <input className="field" value={ytApiKeyOverride} onChange={(e)=>setYtApiKeyOverride(e.target.value)} placeholder="AIza..." />
             <div className="row gap">
               <button className="btn" onClick={googleSignIn}>Sign in with Google</button>
               <button className="btn" onClick={openYouTubeSignin}>Open YouTube Sign‑in</button>
               <button className="btn" onClick={openCookieSettings}>Browser cookie settings</button>
               <button className="btn" onClick={reloadChats}>Reload chat embeds</button>
+              <button className="btn" onClick={()=>setChatHelp(v=>!v)}>{chatHelp?'Hide “Chat here” overlay':'Show “Chat here” overlay'}</button>
             </div>
           </section>
 

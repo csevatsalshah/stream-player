@@ -96,6 +96,62 @@ body {
   visibility: visible
 }
 
+/* Chat helper overlay (sits above chat frame) */
+.chat-helper-abs {
+  position: absolute;
+  pointer-events: none
+}
+
+.chat-helper-abs.hide {
+  display: none
+}
+
+.chat-helper-abs.show {
+  display: block
+}
+
+.chat-helper-card {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  pointer-events: auto;
+  background: rgba(15, 22, 35, .78);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  max-width: min(420px, 48%);
+  box-shadow: var(--shadow)
+}
+
+.chat-helper-card .ch-title {
+  font-weight: 800;
+  margin-bottom: 4px
+}
+
+.chat-helper-card .ch-body {
+  font-size: 12px;
+  opacity: .9
+}
+
+.chat-helper-card .ch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px
+}
+
+.chat-helper-card .ch-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 0;
+  border-radius: 8px;
+  padding: 2px 6px;
+  cursor: pointer;
+  background: #1f2937;
+  color: #e5e7eb
+}
+
 /* Players */
 .player {
   position: absolute;
