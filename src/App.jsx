@@ -22,7 +22,6 @@ function loadYouTubeAPI() {
 }
 
 /* -------- YouTube info (metrics + title) ---------- */
-/** Only fetches when the corresponding toggles are ON (saves API calls). */
 function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled }) {
   const [data, setData] = useState({ viewers: null, likes: null, title: '' });
 
@@ -53,7 +52,6 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled }) {
     }
 
     fetchOnce();
-    // poll only if metrics are enabled (titles usually don't need frequent refresh)
     if (metricsEnabled) timer = setInterval(fetchOnce, METRICS_MS);
     return () => { if (timer) clearInterval(timer); };
   }, [videoId, metricsEnabled, titleEnabled]);
@@ -70,34 +68,25 @@ const DEFAULT_KEYMAP = {
   focusAudio:'a',
   muteAll:'m',
   unmuteAll:'u',
-  // Seeking kept via hotkeys (UI buttons removed)
   nudgeBack:'[',
   nudgeForward:']',
-  toggleChat:'c',              // layout 3
-  toggleInfo:'i',              // toggles Titles + Metrics together
-  chatWidthDec:',',            // Layout 2 chat width -
-  chatWidthInc:'.',            // Layout 2 chat width +
-  s2HeightDec:'ArrowDown',     // Layout 3 S2 height -
-  s2HeightInc:'ArrowUp',       // Layout 3 S2 height +
-  borderDec:'ArrowLeft',       // Border width -
-  borderInc:'ArrowRight',      // Border width +
+  toggleChat:'c',
+  toggleInfo:'i',
+  chatWidthDec:',',
+  chatWidthInc:'.',
+  s2HeightDec:'ArrowDown',
+  s2HeightInc:'ArrowUp',
+  borderDec:'ArrowLeft',
+  borderInc:'ArrowRight',
 };
 const norm = (k) => (k || '').toLowerCase();
 
-/* Small helper for PIP cursors */
-const cursorForDir = (dir) => {
-  switch (dir) {
-    case 'n': return 'n-resize';
-    case 's': return 's-resize';
-    case 'e': return 'e-resize';
-    case 'w': return 'w-resize';
-    case 'ne': return 'ne-resize';
-    case 'nw': return 'nw-resize';
-    case 'se': return 'se-resize';
-    case 'sw': return 'sw-resize';
-    default: return 'default';
-  }
-};
+/* Map RND resize direction -> cursor */
+const cursorForDir = (dir) => ({
+  top: 'n-resize', bottom:'s-resize', left:'w-resize', right:'e-resize',
+  topRight:'ne-resize', topLeft:'nw-resize', bottomRight:'se-resize', bottomLeft:'sw-resize',
+  n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
+}[dir] || 'default');
 
 /* ================================================== */
 export default function App() {
@@ -120,14 +109,13 @@ export default function App() {
 
   /* PIP */
   const [pip, setPip] = useState(() => lsGet('ms_pip', DEFAULT_PIP));
-  const [pipMoving, setPipMoving] = useState(false); // disables transitions while dragging/resizing
-  const [pipLockAR, setPipLockAR] = useState(false); // hold Shift to lock 16:9
-  // Stage‑wide interaction shield while dragging/resizing (prevents iframes from eating events)
+  const [pipMoving, setPipMoving] = useState(false);
+  const [pipLockAR, setPipLockAR] = useState(false);
   const [shield, setShield] = useState({ active:false, cursor:'default' });
 
   /* Theme / Appearance */
   const [bgUrl, setBgUrl] = useState(() => lsGet('ms_bg', ''));
-  const [frameW, setFrameW] = useState(() => lsGet('ms_frame_w', 0)); // px
+  const [frameW, setFrameW] = useState(() => lsGet('ms_frame_w', 0));
   const [frameColor, setFrameColor] = useState(() => lsGet('ms_frame_c', '#ffffff'));
 
   /* Overlays */
@@ -168,6 +156,9 @@ export default function App() {
   const info1 = useYouTubeInfo(s1, { metricsEnabled: showMetrics, titleEnabled: showTitles });
   const info2 = useYouTubeInfo(s2, { metricsEnabled: showMetrics, titleEnabled: showTitles });
 
+  /* Chat reload key (forces iframe refresh) */
+  const [chatRefreshKey, setChatRefreshKey] = useState(0);
+
   /* ---- Boot: IFrame API ---- */
   useEffect(() => { let off=false; loadYouTubeAPI().then(()=>!off&&setYtReady(true)); return ()=>{off=true}; }, []);
   useEffect(() => {
@@ -185,7 +176,7 @@ export default function App() {
     }
   }, [ytReady, s2]);
 
-  /* ---- Force play when IDs change (fixes red button) ---- */
+  /* ---- Force play when IDs change ---- */
   useEffect(() => {
     if (yt1.current && s1) { try { yt1.current.loadVideoById(s1); yt1.current.mute(); yt1.current.playVideo(); } catch {} }
   }, [s1]);
@@ -231,7 +222,7 @@ export default function App() {
       return { left: Math.round(r.left - base.left), top: Math.round(r.top - base.top), width: w, height: h };
     };
     const r1 = toLocal(slotS1.current);
-    const r2 = layout === 4 ? null : toLocal(slotS2.current); // L4 uses PIP rect
+    const r2 = layout === 4 ? null : toLocal(slotS2.current);
     const rc = toLocal(chatSlot.current);
 
     setRectS1(r1); if (r1) lastS1.current = r1;
@@ -239,7 +230,6 @@ export default function App() {
     setRectChat(rc); if (rc) lastChat.current = rc;
   }, [layout]);
 
-  // settle across a few frames (prevents “missing rect” while grid settles)
   const settleTick = useRef(0);
   useLayoutEffect(() => {
     measureAll();
@@ -283,8 +273,9 @@ export default function App() {
   const baseParams = `autoplay=1&playsinline=1&mute=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
   const s1Src = s1 ? `https://www.youtube.com/embed/${s1}?${baseParams}` : null;
   const s2Src = s2 ? `https://www.youtube.com/embed/${s2}?${baseParams}` : null;
-  const chat1Src = s1 ? `https://www.youtube.com/live_chat?v=${s1}&embed_domain=${domain}` : null;
-  const chat2Src = s2 ? `https://www.youtube.com/live_chat?v=${s2}&embed_domain=${domain}` : null;
+
+  const chat1Src = s1 ? `https://www.youtube.com/live_chat?v=${s1}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
+  const chat2Src = s2 ? `https://www.youtube.com/live_chat?v=${s2}&embed_domain=${domain}&_r=${chatRefreshKey}` : null;
 
   /* ---- Audio focus & seek ---- */
   const applyFocus = useCallback((f) => {
@@ -313,11 +304,9 @@ export default function App() {
       if (tag === 'input' || tag === 'textarea') return;
       const k = e.key;
 
-      // Always allow toggling shortcuts
       if (norm(k) === norm(keymap.toggleShortcuts)) { e.preventDefault(); setShortcutsEnabled(v=>!v); return; }
       if (!shortcutsEnabled) return;
 
-      // Prevent page scroll for handled keys
       const stop = () => { e.preventDefault(); e.stopPropagation(); };
 
       if (norm(k) === norm(keymap.openSettings)) { stop(); setShowSettings(true); }
@@ -328,21 +317,15 @@ export default function App() {
       else if (norm(k) === norm(keymap.nudgeBack)) { stop(); nudge(-10); }
       else if (norm(k) === norm(keymap.nudgeForward)) { stop(); nudge(10); }
       else if (norm(k) === norm(keymap.toggleChat) && layout === 3) { stop(); setChatTab(t => (t === 1 ? 2 : 1)); }
-      else if (norm(k) === norm(keymap.toggleInfo)) { // Titles & Metrics together
-        stop();
-        const anyOn = showMetrics || showTitles;
-        setShowMetrics(!anyOn); setShowTitles(!anyOn);
+      else if (norm(k) === norm(keymap.toggleInfo)) {
+        stop(); const anyOn = showMetrics || showTitles; setShowMetrics(!anyOn); setShowTitles(!anyOn);
       }
-      // L2 chat width +/- (min 260, max 720)
       else if (norm(k) === norm(keymap.chatWidthDec)) { stop(); setL2ChatWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); }
       else if (norm(k) === norm(keymap.chatWidthInc)) { stop(); setL2ChatWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); }
-      // L3 S2 height +/- (min 120, max 800)
       else if (k === keymap.s2HeightDec) { stop(); setL3S2Height(v=>clamp(v-12,120,800)); requestAnimationFrame(measureAll); }
       else if (k === keymap.s2HeightInc) { stop(); setL3S2Height(v=>clamp(v+12,120,800)); requestAnimationFrame(measureAll); }
-      // Border width +/- (min 0, max 12)
       else if (k === keymap.borderDec) { stop(); setFrameW(v=>clamp(v-1,0,12)); }
       else if (k === keymap.borderInc) { stop(); setFrameW(v=>clamp(v+1,0,12)); }
-      // Layouts
       else if (norm(k) === norm(keymap.layout1)) setLayout(1);
       else if (norm(k) === norm(keymap.layout2)) setLayout(2);
       else if (norm(k) === norm(keymap.layout3)) setLayout(3);
@@ -401,7 +384,7 @@ export default function App() {
     const id = getYouTubeId(v); if (id) { setS2(id); setS2Input(id); } else alert('Invalid link or ID.');
   };
   const [toastMsg, setToastMsg] = useState('');
-  function toast(t){ setToastMsg(t); setTimeout(()=>setToastMsg(''),1600); }
+  function toast(t){ setToastMsg(t); setTimeout(()=>setToastMsg(''),1800); }
   const copyShare = async () => {
     try {
       const q = new URLSearchParams(); if (s1) q.set('s1', s1); if (s2) q.set('s2', s2);
@@ -424,27 +407,41 @@ export default function App() {
     requestAnimationFrame(measureAll);
     toast('Layout reset');
   };
-  const resetKeymap = () => {
-    setKeymap({ ...DEFAULT_KEYMAP });
-    toast('Keybinds reset');
-  };
+  const resetKeymap = () => { setKeymap({ ...DEFAULT_KEYMAP }); toast('Keybinds reset'); };
 
-  /* ---- Chat visibility ---- */
-  let showChat1 = false, showChat2 = false;
-  if (layout === 2) {
-    const leftId = swap ? s2 : s1;
-    showChat1 = !!(leftId && leftId === s1);
-    showChat2 = !!(leftId && leftId === s2);
-  } else if (layout === 3) {
-    showChat1 = chatTab === 1;
-    showChat2 = chatTab === 2;
-  }
-
-  /* ---- Global border width: disabled on L1 and L6 ---- */
-  const globalBorderW = (layout === 1 || layout === 6) ? 0 : frameW;
-
-  /* ---- Helpers for chat pop-out ---- */
+  /* ---- Chat helpers (Settings) ---- */
+  const reloadChats = () => setChatRefreshKey(k => k + 1);
   const chatPopoutUrl = (id) => id ? `https://www.youtube.com/live_chat?v=${id}&is_popout=1` : null;
+
+  async function requestCookieAccess() {
+    try {
+      // Newer API: request for a specific third‑party origin (if supported by the browser)
+      if (typeof document.requestStorageAccessFor === 'function') {
+        await document.requestStorageAccessFor('https://www.youtube.com');
+        await document.requestStorageAccessFor('https://accounts.google.com');
+        toast('Requested cookie access for YouTube. Reloading chat…');
+        reloadChats();
+        return;
+      }
+      // Older API: only callable from third‑party iframe contexts; here we can only advise the user
+      if (typeof document.hasStorageAccess === 'function') {
+        const has = await document.hasStorageAccess();
+        if (!has) {
+          toast('Your browser blocked third‑party cookies. Sign‑in and then reload chat.');
+        } else {
+          reloadChats();
+        }
+        return;
+      }
+      toast('Storage Access API not available. Use "Open YouTube Sign‑in" below, then reload chat.');
+    } catch (err) {
+      toast(`Request failed: ${err?.message || String(err)}`);
+    }
+  }
+  function openYouTubeSignin() {
+    window.open('https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&hl=en', '_blank', 'noopener,noreferrer');
+  }
+  function openPopout(id){ const u = chatPopoutUrl(id); if (u) window.open(u, '_blank', 'noopener,noreferrer'); }
 
   /* ---- Render ---- */
   return (
@@ -474,7 +471,7 @@ export default function App() {
           className="stage"
           ref={stageRef}
           style={{
-            '--frame-w': `${globalBorderW}px`,
+            '--frame-w': `${(layout === 1 || layout === 6) ? 0 : frameW}px`,
             '--frame-color': frameColor,
             backgroundImage: bgUrl ? `url(${bgUrl})` : undefined
           }}
@@ -513,68 +510,47 @@ export default function App() {
             )}
           </div>
 
-          {/* Overlays: title (first), then metrics */}
+          {/* Overlays: title then metrics */}
           <div className="metrics-layer">
-            {vis1 && tgt1 && showTitles && info1.title && (
-              <div className="title-badge" style={{ left: tgt1.left + 10, top: tgt1.top + 10 }}>
-                {info1.title}
-              </div>
+            {s1Style.visibility==='visible' && showTitles && info1.title && (
+              <div className="title-badge" style={{ left: s1Style.left + 10, top: s1Style.top + 10 }}>{info1.title}</div>
             )}
-            {vis1 && tgt1 && showMetrics && (info1.viewers !== null || info1.likes !== null) && (
-              <div className="metric-badge" style={{ left: tgt1.left + 10, top: tgt1.top + (showTitles && info1.title ? 44 : 10) }}>
+            {s1Style.visibility==='visible' && showMetrics && (info1.viewers !== null || info1.likes !== null) && (
+              <div className="metric-badge" style={{ left: s1Style.left + 10, top: s1Style.top + (showTitles && info1.title ? 44 : 10) }}>
                 {info1.viewers !== null && <span>👀 {info1.viewers.toLocaleString()}</span>}
                 {info1.likes !== null && <span>👍 {info1.likes.toLocaleString()}</span>}
               </div>
             )}
-
-            {vis2 && tgt2 && showTitles && info2.title && (
-              <div className="title-badge" style={{ left: tgt2.left + 10, top: tgt2.top + 10 }}>
-                {info2.title}
-              </div>
+            {s2Style.visibility==='visible' && showTitles && info2.title && (
+              <div className="title-badge" style={{ left: s2Style.left + 10, top: s2Style.top + 10 }}>{info2.title}</div>
             )}
-            {vis2 && tgt2 && showMetrics && (info2.viewers !== null || info2.likes !== null) && (
-              <div className="metric-badge" style={{ left: tgt2.left + 10, top: tgt2.top + (showTitles && info2.title ? 44 : 10) }}>
+            {s2Style.visibility==='visible' && showMetrics && (info2.viewers !== null || info2.likes !== null) && (
+              <div className="metric-badge" style={{ left: s2Style.left + 10, top: s2Style.top + (showTitles && info2.title ? 44 : 10) }}>
                 {info2.viewers !== null && <span>👀 {info2.viewers.toLocaleString()}</span>}
                 {info2.likes !== null && <span>👍 {info2.likes.toLocaleString()}</span>}
               </div>
             )}
           </div>
 
-          {/* UI slots + chat + controls */}
+          {/* UI layer: slots, chat, controls */}
           <div className="ui-layer">
-            {/* Interaction shield during PIP drag/resize */}
+            {/* Interaction shield (prevents iframes from stealing events during drag/resize) */}
             <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
 
-            {/* --- Layout content (slots) --- */}
+            {/* Layout content */}
             {(() => {
               switch (layout) {
                 case 1:
                   return (<div className="layout layout-1"><div className="slot slot-s1" ref={slotS1} /></div>);
-                case 2: {
-                  const leftId = swap ? s2 : s1;
-                  const leftPopout = chatPopoutUrl(leftId);
+                case 2:
                   return (
                     <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
                       <div /> {/* spacer */}
-                      <div className="chat-panel">
-                        <div className="chat-toolbar">
-                          <button
-                            className="btn"
-                            onClick={() => leftPopout && window.open(leftPopout, '_blank', 'noopener,noreferrer')}
-                            disabled={!leftPopout}
-                            title="Open YouTube Pop‑out Chat (sign‑in & chat)"
-                            style={{ pointerEvents:'auto' }}
-                          >Pop‑out Chat</button>
-                        </div>
-                        <div className="chat-slot" ref={chatSlot} />
-                      </div>
+                      <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
                     </div>
                   );
-                }
-                case 3: {
-                  const activeId = (chatTab === 1 ? s1 : s2);
-                  const activePopout = chatPopoutUrl(activeId);
+                case 3:
                   return (
                     <div className="layout layout-3">
                       <div className="slot slot-s1" ref={slotS1} />
@@ -589,33 +565,38 @@ export default function App() {
                             <button className={chatTab===1?'active':''} onClick={()=>setChatTab(1)}>Stream 1 Chat</button>
                             <button className={chatTab===2?'active':''} onClick={()=>setChatTab(2)} disabled={!s2}>Stream 2 Chat</button>
                           </div>
-                          <div className="chat-toolbar">
-                            <button
-                              className="btn"
-                              onClick={() => activePopout && window.open(activePopout, '_blank', 'noopener,noreferrer')}
-                              disabled={!activePopout}
-                              title="Open YouTube Pop‑out Chat (sign‑in & chat)"
-                              style={{ pointerEvents:'auto' }}
-                            >Pop‑out Chat</button>
-                          </div>
                           <div className="chat-slot" ref={chatSlot} />
                         </div>
                       </div>
                     </div>
                   );
-                }
                 case 4:
                   return (
                     <div className="layout layout-4">
                       <div className="slot slot-s1" ref={slotS1} />
                       <Rnd
+                        className="pip-overlay"
+                        style={{ pointerEvents:'auto', zIndex: 6 }}
                         size={{ width: pip.width, height: pip.height }}
                         position={{ x: pip.x, y: pip.y }}
                         bounds=".stage"
                         minWidth={220}
                         minHeight={124}
                         dragHandleClassName="pip-drag-handle"
-                        enableResizing={{ top:true, right:true, bottom:true, left:true, topRight:true, bottomRight:true, bottomLeft:true, topLeft:true }}
+                        enableResizing={{
+                          top:true, right:true, bottom:true, left:true,
+                          topRight:true, bottomRight:true, bottomLeft:true, topLeft:true
+                        }}
+                        resizeHandleStyles={{
+                          top:{ height:'12px', top:'-6px', left:0, right:0 },
+                          bottom:{ height:'12px', bottom:'-6px', left:0, right:0 },
+                          left:{ width:'12px', left:'-6px', top:0, bottom:0 },
+                          right:{ width:'12px', right:'-6px', top:0, bottom:0 },
+                          topLeft:{ width:'18px', height:'18px', left:'-9px', top:'-9px' },
+                          topRight:{ width:'18px', height:'18px', right:'-9px', top:'-9px' },
+                          bottomLeft:{ width:'18px', height:'18px', left:'-9px', bottom:'-9px' },
+                          bottomRight:{ width:'18px', height:'18px', right:'-9px', bottom:'-9px' },
+                        }}
                         lockAspectRatio={pipLockAR ? 16/9 : false}
                         onDragStart={() => { setPipMoving(true); setShield({active:true, cursor:'grabbing'}); }}
                         onResizeStart={(e, dir) => { setPipMoving(true); setPipLockAR(!!e?.shiftKey); setShield({active:true, cursor:cursorForDir(dir)}); }}
@@ -627,11 +608,9 @@ export default function App() {
                         onResizeStop={(e, dir, ref, delta, pos) =>
                           { setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) }); setPipMoving(false); setShield({active:false, cursor:'default'}); }
                         }
-                        className="pip-overlay"
                       >
                         <div className="pip-box">
                           <div className="pip-drag-handle" title="Drag PIP">⋮⋮ Drag</div>
-                          {/* note: box ignores pointer events; handle & resize grips work; clicks go to iframe */}
                         </div>
                       </Rnd>
                     </div>
@@ -668,7 +647,7 @@ export default function App() {
             <div className="chat-layer">
               {chat1Src && (
                 <iframe
-                  className={`chat-frame-abs ${showChat1?'show':'hide'}`}
+                  className={`chat-frame-abs ${(layout===2 && (swap ? s2 : s1) === s1) || (layout===3 && chatTab===1) ? 'show' : 'hide'}`}
                   title="Stream 1 Chat"
                   src={chat1Src}
                   allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
@@ -677,7 +656,7 @@ export default function App() {
               )}
               {chat2Src && (
                 <iframe
-                  className={`chat-frame-abs ${showChat2?'show':'hide'}`}
+                  className={`chat-frame-abs ${(layout===2 && (swap ? s2 : s1) === s2) || (layout===3 && chatTab===2) ? 'show' : 'hide'}`}
                   title="Stream 2 Chat"
                   src={chat2Src}
                   allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
@@ -686,7 +665,7 @@ export default function App() {
               )}
             </div>
 
-            {/* Top center: layout buttons (auto-hide) */}
+            {/* Top center: layout buttons */}
             <div className={`layout-menu ${menuVisible ? 'visible' : ''}`}>
               {[1,2,3,4,5,6].map(n=>(
                 <button key={n} onClick={()=>setLayout(n)} className={layout===n?'active':''}>{n}</button>
@@ -695,7 +674,7 @@ export default function App() {
               <button onClick={resetLayout} title="Reset splits & PIP">Reset</button>
             </div>
 
-            {/* Top-right: Settings (auto-hide like layout menu) */}
+            {/* Top-right: Settings */}
             <div className={`top-right-actions ${menuVisible ? 'visible' : ''}`}>
               <button className="action-btn" onClick={()=>setShowSettings(true)}>Settings ⚙️</button>
             </div>
@@ -705,7 +684,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Settings (all‑in‑one) */}
+      {/* Settings */}
       {showSettings && (
         <SettingsModal
           close={() => setShowSettings(false)}
@@ -736,6 +715,12 @@ export default function App() {
           showTitles={showTitles} setShowTitles={setShowTitles}
           // keymap
           keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
+          // chat helpers
+          s1={s1} s2={s2}
+          requestCookieAccess={requestCookieAccess}
+          openYouTubeSignin={openYouTubeSignin}
+          openPopout={openPopout}
+          reloadChats={reloadChats}
         />
       )}
     </div>
@@ -758,6 +743,8 @@ function SettingsModal(props){
     showMetrics, setShowMetrics, showTitles, setShowTitles,
     // keymap
     keymap, setKeymap, resetKeymap,
+    // chat helpers
+    s1, s2, requestCookieAccess, openYouTubeSignin, openPopout, reloadChats,
   } = props;
 
   const keyCount = useMemo(() => {
@@ -866,6 +853,21 @@ function SettingsModal(props){
             <div className="row">
               <div className="label">Show stream title</div>
               <button className={`toggle-btn ${showTitles ? 'enabled' : 'disabled'}`} onClick={()=>setShowTitles(v=>!v)}>{showTitles?'ON':'OFF'}</button>
+            </div>
+          </section>
+
+          {/* Chat & Sign‑in */}
+          <section className="settings-group">
+            <h4>Chat & Sign‑in</h4>
+            <p className="muted">To chat inside the embedded panel, your browser needs to allow YouTube’s cookies in iframes and your YouTube account must be signed‑in in this browser.</p>
+            <div className="row gap">
+              <button className="btn" onClick={requestCookieAccess} title="Use Storage Access API when available">Grant cookie access</button>
+              <button className="btn" onClick={openYouTubeSignin}>Open YouTube Sign‑in</button>
+              <button className="btn" onClick={reloadChats}>Reload chat embeds</button>
+            </div>
+            <div className="row gap">
+              <button className="btn" onClick={()=>openPopout(s1)} disabled={!s1}>Open Pop‑out Chat (Stream 1)</button>
+              <button className="btn" onClick={()=>openPopout(s2)} disabled={!s2}>Open Pop‑out Chat (Stream 2)</button>
             </div>
           </section>
 

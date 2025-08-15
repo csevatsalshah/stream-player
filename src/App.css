@@ -82,7 +82,6 @@ label{font-size:13px;color:#d1d5db}
   border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative;min-height:0
 }
 .chat-slot{flex:1;min-height:0}
-.chat-toolbar{display:flex;justify-content:flex-end;padding:6px;border-bottom:1px solid #1f2a3d;background:#0e1522;gap:6px}
 
 /* L3 */
 .layout-3{display:grid;grid-template-columns:1fr 360px;gap:8px;padding:8px;height:100%;min-height:0}
@@ -99,13 +98,15 @@ label{font-size:13px;color:#d1d5db}
 /* L4 (PIP) */
 .layout-4{position:relative;width:100%;height:100%}
 .layout-4 .slot-s1{position:absolute;inset:0}
-.pip-overlay{position:absolute;z-index:5}
+
+/* Ensure RND overlay is interactive even though ui-layer uses pointer-events:none */
+.pip-overlay{position:absolute;z-index:5;pointer-events:auto}
 .pip-box{
   width:100%;height:100%;
-  border:1px solid rgba(255,255,255,.9);  /* fixed 1px border only for PIP */
+  border:1px solid rgba(255,255,255,.9);
   border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.35);
   background:transparent;position:relative;
-  pointer-events:none; /* let clicks go to iframe underneath */
+  pointer-events:none;
 }
 .pip-drag-handle{
   position:absolute;left:50%;transform:translateX(-50%);top:6px;
@@ -126,7 +127,7 @@ label{font-size:13px;color:#d1d5db}
 
 /* Shield to block iframes while resizing/dragging */
 .interaction-shield{
-  position:absolute;inset:0;z-index:4; /* under the PIP overlay (z=5), above players/chat/metrics */
+  position:absolute;inset:0;z-index:4;
   pointer-events:none;background:transparent;
 }
 .interaction-shield.show{pointer-events:auto}
@@ -144,7 +145,7 @@ label{font-size:13px;color:#d1d5db}
 .plus-icon{font-size:84px;display:block;margin-bottom:8px}
 .add-stream-content p{font-size:22px;margin:6px 0 16px}
 
-/* Floating controls (auto‑hide on mouse move) */
+/* Floating controls */
 .layout-menu{
   pointer-events:auto;position:fixed;top:12px;left:50%;transform:translateX(-50%);
   background:rgba(15,22,35,.7);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(8px);
@@ -154,7 +155,7 @@ label{font-size:13px;color:#d1d5db}
 .layout-menu button{background:#1a2435;color:#e5e7eb;border:0;border-radius:8px;padding:8px 10px;cursor:pointer;font-weight:700}
 .layout-menu button.active{background:#334155;color:#fff}
 
-/* Settings button – same hover behavior as layout menu */
+/* Settings button */
 .top-right-actions{
   position:fixed;top:12px;right:12px;display:flex;gap:6px;z-index:11;pointer-events:auto;
   opacity:0;transition:opacity .25s ease;
