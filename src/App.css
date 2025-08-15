@@ -68,90 +68,6 @@ body {
   pointer-events: none
 }
 
-.chat-layer {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none
-}
-
-.chat-frame-abs {
-  position: absolute;
-  border: var(--frame-w) solid var(--frame-color);
-  width: 100%;
-  height: 100%;
-  border-radius: 12px;
-  pointer-events: auto;
-  background: #000;
-  overflow: hidden;
-}
-
-.chat-frame-abs.hide {
-  opacity: 0;
-  visibility: hidden
-}
-
-.chat-frame-abs.show {
-  opacity: 1;
-  visibility: visible
-}
-
-/* Chat helper overlay (sits above chat frame) */
-.chat-helper-abs {
-  position: absolute;
-  pointer-events: none
-}
-
-.chat-helper-abs.hide {
-  display: none
-}
-
-.chat-helper-abs.show {
-  display: block
-}
-
-.chat-helper-card {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  pointer-events: auto;
-  background: rgba(15, 22, 35, .78);
-  border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 12px;
-  padding: 10px 12px;
-  max-width: min(420px, 48%);
-  box-shadow: var(--shadow)
-}
-
-.chat-helper-card .ch-title {
-  font-weight: 800;
-  margin-bottom: 4px
-}
-
-.chat-helper-card .ch-body {
-  font-size: 12px;
-  opacity: .9
-}
-
-.chat-helper-card .ch-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px
-}
-
-.chat-helper-card .ch-close {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  border: 0;
-  border-radius: 8px;
-  padding: 2px 6px;
-  cursor: pointer;
-  background: #1f2937;
-  color: #e5e7eb
-}
-
 /* Players */
 .player {
   position: absolute;
@@ -322,11 +238,9 @@ label {
   inset: 0
 }
 
-/* L2: stream | spacer | chat */
+/* L2: single stream with margins */
 .layout-2 {
   display: grid;
-  grid-template-rows: 100%;
-  gap: 8px;
   padding: 8px;
   height: 100%;
   min-height: 0
@@ -337,24 +251,6 @@ label {
   align-self: center;
   width: 100%;
   height: auto
-}
-
-/* Chat panel */
-.chat-panel {
-  pointer-events: auto;
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  min-height: 0
-}
-
-.chat-slot {
-  flex: 1;
-  min-height: 0
 }
 
 /* L3 */
@@ -401,36 +297,6 @@ label {
   font-size: 64px;
   border: 0;
   cursor: pointer
-}
-
-.chat-toggle {
-  pointer-events: auto;
-  display: flex;
-  gap: 6px;
-  padding: 6px;
-  background: #0e1522;
-  border-bottom: 1px solid #1f2a3d
-}
-
-.chat-toggle button {
-  flex: 1;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 0;
-  cursor: pointer;
-  background: #132033;
-  color: #cbd5e1;
-  font-weight: 600
-}
-
-.chat-toggle button.active {
-  background: #0ea5e9;
-  color: white
-}
-
-.chat-toggle button:disabled {
-  opacity: .5;
-  cursor: not-allowed
 }
 
 /* L4 (PIP) */
@@ -750,7 +616,6 @@ label {
   gap: 6px
 }
 
-/* Settings button – same hover behavior as layout menu */
 .top-right-actions {
   position: fixed;
   top: 12px;
@@ -934,20 +799,4 @@ label {
   color: #97a0ad;
   font-size: 12px;
   margin: 6px 0 0
-}
-
-/* Toggle btn */
-.toggle-btn {
-  background: #1f2937;
-  color: #e5e7eb;
-  border: 0;
-  border-radius: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-weight: 700
-}
-
-.toggle-btn.enabled {
-  background: #0ea5e9;
-  color: #fff
 }
