@@ -8,7 +8,8 @@ const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
 const DEFAULT_L2_CHAT = 360;   // px
 const DEFAULT_L3_S2H  = 240;   // px
 const METRICS_MS = 30000;      // 30s
-const YT_API_KEY = 'AIzaSyA_WWfYxtFqm680Yqzoa0_uUg3iq3T3tIY';
+const YT_API_KEY = process.env.REACT_APP_YT_API_KEY || '';
+
 
 /* -------------- YouTube IFrame API ---------------- */
 function loadYouTubeAPI() {
