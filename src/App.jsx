@@ -5,11 +5,12 @@ import { getYouTubeId, lsGet, lsSet, clamp } from './utils';
 
 /* -------------------- Tunables -------------------- */
 const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
-const DEFAULT_L3_S2H  = 240;         // px (Layout 3 top stream height)
-const DEFAULT_L3_RIGHT_W = 360;      // px (Layout 3 right column width for S2)
-const METRICS_MS = 30000;            // 30s
+const DEFAULT_L2_CHAT = 360;   // Layout 2 chat width (px)
+const DEFAULT_L3_S2H  = 240;   // Layout 3 Stream 2 height (px)
+const DEFAULT_L3_RIGHT_W = 360; // Layout 3 right column width (px)
+const METRICS_MS = 30000;      // 30s
 
-// Default YouTube Data API key comes from env, but can be overridden per-user in settings
+// Default API key (optional) — can be overridden by user in Settings
 const YT_API_KEY_DEFAULT = process.env.REACT_APP_YT_API_KEY || '';
 
 /* -------------- YouTube IFrame API ---------------- */
@@ -28,7 +29,7 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
   const [data, setData] = useState({ viewers: null, likes: null, title: '' });
 
   useEffect(() => {
-    if (!videoId || (!metricsEnabled && !titleEnabled)) return;
+    if (!videoId || (!metricsEnabled && !titleEnabled) || !apiKey) return;
     let timer;
 
     async function fetchOnce() {
@@ -49,7 +50,7 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
             ? Number(it.statistics.likeCount) : null,
           title:   titleEnabled ? (it?.snippet?.title || '') : ''
         });
-      } catch { /* ignore */ }
+      } catch { /* ignore network/api errors */ }
     }
 
     fetchOnce();
@@ -71,11 +72,17 @@ const DEFAULT_KEYMAP = {
   unmuteAll:'u',
   nudgeBack:'[',
   nudgeForward:']',
+  toggleChat:'c',            // Layout 3 chat tab toggle
   toggleInfo:'i',
-  s2HeightDec:'ArrowDown',   // Layout 3 S2 height -
-  s2HeightInc:'ArrowUp',     // Layout 3 S2 height +
-  l3RightDec:'-',            // Layout 3 – right column width -
-  l3RightInc:'=',            // Layout 3 – right column width +
+  // Layout 2 chat width
+  chatWidthDec:',',
+  chatWidthInc:'.',
+  // Layout 3 sizes
+  s2HeightDec:'ArrowDown',
+  s2HeightInc:'ArrowUp',
+  l3RightDec:'-',
+  l3RightInc:'=',
+  // Frame border
   borderDec:'ArrowLeft',
   borderInc:'ArrowRight',
 };
@@ -112,18 +119,22 @@ export default function App() {
   const [s1, setS1] = useState(() => getYouTubeId(lsGet('ms_stream1','')));
   const [s2, setS2] = useState(() => getYouTubeId(lsGet('ms_stream2','')));
 
-  /* Stream enabled flags (turning OFF destroys the player) */
+  /* Stream enabled flags (OFF destroys the player so it won’t run in bg) */
   const [s1Enabled, setS1Enabled] = useState(() => lsGet('ms_s1_enabled', true));
   const [s2Enabled, setS2Enabled] = useState(() => lsGet('ms_s2_enabled', true));
+
+  /* Chat */
+  const [chatTab, setChatTab] = useState(() => lsGet('ms_chatTab', 1)); // 1 | 2
 
   /* Layout/UI */
   const [layout, setLayout] = useState(() => lsGet('ms_layout',1));
   const [swap, setSwap] = useState(() => lsGet('ms_swap',false));
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => lsGet('ms_shortcuts_enabled',true));
   const [menuVisible, setMenuVisible] = useState(true);                 // auto‑hide bars
-  const [controlsEnabled, setControlsEnabled] = useState(() => lsGet('ms_controls_enabled', true)); // toggle bottom controls
+  const [controlsEnabled, setControlsEnabled] = useState(() => lsGet('ms_controls_enabled', true)); // bottom controls toggle
 
   /* Sizes */
+  const [l2ChatWidth, setL2ChatWidth] = useState(() => lsGet('ms_l2_chat', DEFAULT_L2_CHAT));
   const [l3S2Height, setL3S2Height] = useState(() => lsGet('ms_l3_s2h', DEFAULT_L3_S2H));
   const [l3RightWidth, setL3RightWidth] = useState(() => lsGet('ms_l3_right_w', DEFAULT_L3_RIGHT_W));
 
@@ -154,13 +165,17 @@ export default function App() {
   const stageRef = useRef(null);
   const slotS1 = useRef(null);
   const slotS2 = useRef(null);
+  const chatSlot = useRef(null);
   const [rectS1, setRectS1] = useState(null);
   const [rectS2, setRectS2] = useState(null);
+  const [rectChat, setRectChat] = useState(null);
   const lastS1 = useRef(null);
   const lastS2 = useRef(null);
+  const lastChat = useRef(null);
 
   /* Player API */
   const origin = useMemo(() => window.location.origin, []);
+  const domain = useMemo(() => window.location.hostname, []);
   const p1Ref = useRef(null);
   const p2Ref = useRef(null);
   const yt1 = useRef(null);
@@ -255,6 +270,7 @@ export default function App() {
   useEffect(()=>lsSet('ms_controls_enabled', controlsEnabled),[controlsEnabled]);
   useEffect(()=>lsSet('ms_swap', swap),[swap]);
   useEffect(()=>lsSet('ms_shortcuts_enabled', shortcutsEnabled),[shortcutsEnabled]);
+  useEffect(()=>lsSet('ms_l2_chat', l2ChatWidth),[l2ChatWidth]);
   useEffect(()=>lsSet('ms_l3_s2h', l3S2Height),[l3S2Height]);
   useEffect(()=>lsSet('ms_l3_right_w', l3RightWidth),[l3RightWidth]);
   useEffect(()=>lsSet('ms_pip', pip),[pip]);
@@ -275,6 +291,7 @@ export default function App() {
   useEffect(()=>lsSet('ms_q1', q1),[q1]);
   useEffect(()=>lsSet('ms_q2', q2),[q2]);
   useEffect(()=>lsSet('ms_yt_api_key', ytApiKeyOverride),[ytApiKeyOverride]);
+  useEffect(()=>lsSet('ms_chatTab', chatTab),[chatTab]);
 
   /* ---- Auto-hide top/bottom controls ---- */
   useEffect(() => {
@@ -298,8 +315,11 @@ export default function App() {
     };
     const r1 = toLocal(slotS1.current);
     const r2 = layout === 4 ? null : toLocal(slotS2.current); // L4 uses PIP rect
+    const rc = toLocal(chatSlot.current);
+
     setRectS1(r1); if (r1) lastS1.current = r1;
     setRectS2(r2); if (r2) lastS2.current = r2;
+    setRectChat(rc); if (rc) lastChat.current = rc;
   }, [layout]);
 
   const settleTick = useRef(0);
@@ -314,12 +334,13 @@ export default function App() {
       if (++frames < 8) requestAnimationFrame(raf);
     }
     requestAnimationFrame(raf);
-  }, [layout, l3S2Height, l3RightWidth, measureAll]);
+  }, [layout, l2ChatWidth, l3S2Height, l3RightWidth, measureAll]);
 
   useEffect(() => {
     const ro = new ResizeObserver(() => requestAnimationFrame(measureAll));
     if (slotS1.current) ro.observe(slotS1.current);
     if (slotS2.current) ro.observe(slotS2.current);
+    if (chatSlot.current) ro.observe(chatSlot.current);
     return () => ro.disconnect();
   }, [layout, measureAll]);
 
@@ -340,10 +361,13 @@ export default function App() {
     window.history.replaceState(null, '', url);
   }, [s1, s2]);
 
-  /* ---- Sources ---- */
+  /* ---- Player & chat sources ---- */
   const baseParams = `autoplay=1&playsinline=1&mute=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
   const s1Src = (s1 && s1Enabled) ? `https://www.youtube.com/embed/${s1}?${baseParams}` : null;
   const s2Src = (s2 && s2Enabled) ? `https://www.youtube.com/embed/${s2}?${baseParams}` : null;
+
+  const chat1Src = s1 ? `https://www.youtube.com/live_chat?v=${s1}&embed_domain=${domain}` : null;
+  const chat2Src = s2 ? `https://www.youtube.com/live_chat?v=${s2}&embed_domain=${domain}` : null;
 
   /* ---- Unified audio apply (hotkeys + UI in sync) ---- */
   const applyAudioStates = useCallback(() => {
@@ -386,7 +410,7 @@ export default function App() {
         tag === 'textarea' ||
         (tag === 'input' && !['range','checkbox','color','button','submit'].includes(type)) ||
         isKeybindField;
-      if (isTypingContext) return; // sliders/buttons won't block shortcuts
+      if (isTypingContext) return;
 
       const k = e.key;
 
@@ -403,15 +427,22 @@ export default function App() {
       else if (norm(k) === norm(keymap.unmuteAll)) { stop(); unmuteAll(); }
       else if (norm(k) === norm(keymap.nudgeBack)) { stop(); nudge(-10); }
       else if (norm(k) === norm(keymap.nudgeForward)) { stop(); nudge(10); }
+      else if (norm(k) === norm(keymap.toggleChat) && layout === 3) { stop(); setChatTab(t => (t === 1 ? 2 : 1)); }
       else if (norm(k) === norm(keymap.toggleInfo)) {
         stop(); const anyOn = showMetrics || showTitles; setShowMetrics(!anyOn); setShowTitles(!anyOn);
       }
+      // Layout 2 chat width +/- (min 260, max 720)
+      else if (norm(k) === norm(keymap.chatWidthDec)) { stop(); setL2ChatWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); }
+      else if (norm(k) === norm(keymap.chatWidthInc)) { stop(); setL2ChatWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); }
+      // Layout 3 adjustments
       else if (k === keymap.s2HeightDec) { stop(); setL3S2Height(v=>clamp(v-12,120,800)); requestAnimationFrame(measureAll); }
       else if (k === keymap.s2HeightInc) { stop(); setL3S2Height(v=>clamp(v+12,120,800)); requestAnimationFrame(measureAll); }
       else if (norm(k) === norm(keymap.l3RightDec)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); } }
       else if (norm(k) === norm(keymap.l3RightInc)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); } }
+      // Frame border
       else if (k === keymap.borderDec) { stop(); setFrameW(v=>clamp(v-1,0,12)); }
       else if (k === keymap.borderInc) { stop(); setFrameW(v=>clamp(v+1,0,12)); }
+      // Layouts
       else if (norm(k) === norm(keymap.layout1)) setLayout(1);
       else if (norm(k) === norm(keymap.layout2)) setLayout(2);
       else if (norm(k) === norm(keymap.layout3)) setLayout(3);
@@ -488,6 +519,7 @@ export default function App() {
     setShowSettings(false);
   };
   const resetLayout = () => {
+    setL2ChatWidth(DEFAULT_L2_CHAT);
     setL3S2Height(DEFAULT_L3_S2H);
     setL3RightWidth(DEFAULT_L3_RIGHT_W);
     setPip(DEFAULT_PIP);
@@ -652,32 +684,41 @@ export default function App() {
             )}
           </div>
 
-          {/* UI layer: slots & controls */}
+          {/* UI layer: slots, chat, controls */}
           <div className="ui-layer">
             {/* Interaction shield to block iframes during drag/resize */}
             <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
 
-            {/* Layout content (slots) */}
+            {/* Layout content (slots & chat holders) */}
             {(() => {
               switch (layout) {
                 case 1:
                   return (<div className="layout layout-1"><div className="slot slot-s1" ref={slotS1} /></div>);
                 case 2:
                   return (
-                    <div className="layout layout-2">
+                    <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
+                      <div /> {/* spacer */}
+                      <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
                     </div>
                   );
                 case 3:
                   return (
                     <div className="layout layout-3" style={{ gridTemplateColumns: `1fr ${l3RightWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
-                      <div className="right-col" style={{ gridTemplateRows: `${l3S2Height}px 1fr` }}>
+                      <div className="right-col" style={{ gridTemplateRows: `${l3S2Height}px 8px 1fr` }}>
                         <div className="slot-wrap">
                           <div className={`slot slot-s2 fill ${s2 ? 'transparent' : ''}`} ref={slotS2} />
                           {!s2 && <button className="add-stream-tile" onClick={addStream2}>+</button>}
                         </div>
-                        <div /> {/* filler area (no chat) */}
+                        <div />
+                        <div className="chat-panel">
+                          <div className="chat-toggle">
+                            <button className={chatTab===1?'active':''} onClick={()=>setChatTab(1)}>Stream 1 Chat</button>
+                            <button className={chatTab===2?'active':''} onClick={()=>setChatTab(2)} disabled={!s2}>Stream 2 Chat</button>
+                          </div>
+                          <div className="chat-slot" ref={chatSlot} />
+                        </div>
                       </div>
                     </div>
                   );
@@ -715,6 +756,34 @@ export default function App() {
               }
             })()}
 
+            {/* Chat (mounted once, positioned over .chat-slot) */}
+            <div className="chat-layer">
+              {chat1Src && (
+                <iframe
+                  className={`chat-frame-abs ${
+                    (layout===2 && !!s1) || (layout===3 && chatTab===1) ? 'show' : 'hide'
+                  }`}
+                  title="Stream 1 Chat"
+                  src={chat1Src}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  referrerPolicy="origin-when-cross-origin"
+                  style={styleFromRect(rectChat, lastChat, true)}
+                />
+              )}
+              {chat2Src && (
+                <iframe
+                  className={`chat-frame-abs ${
+                    (layout===2 && false) || (layout===3 && chatTab===2) ? 'show' : 'hide'
+                  }`}
+                  title="Stream 2 Chat"
+                  src={chat2Src}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  referrerPolicy="origin-when-cross-origin"
+                  style={styleFromRect(rectChat, lastChat, true)}
+                />
+              )}
+            </div>
+
             {/* Top center: layout buttons */}
             <div className={`layout-menu ${menuVisible ? 'visible' : ''}`}>
               {[1,2,3,4,5,6].map(n=>(
@@ -726,7 +795,7 @@ export default function App() {
               <button onClick={()=>setShowSettings(true)} title="Open settings">⚙️</button>
             </div>
 
-            {/* Bottom Controls Bar */}
+            {/* Bottom Controls Bar (auto-hide on idle) */}
             {(controlsEnabled && menuVisible) && (
               <div className="bottom-controls">
                 <div className="bc-group">
@@ -819,6 +888,7 @@ export default function App() {
           }}
           clearToLanding={clearToLanding}
           // layout sizes
+          l2ChatWidth={l2ChatWidth} setL2ChatWidth={(v)=>{ setL2ChatWidth(v); requestAnimationFrame(measureAll); }}
           l3S2Height={l3S2Height} setL3S2Height={(v)=>{ setL3S2Height(v); requestAnimationFrame(measureAll); }}
           l3RightWidth={l3RightWidth} setL3RightWidth={(v)=>{ setL3RightWidth(v); requestAnimationFrame(measureAll); }}
           // appearance
@@ -835,7 +905,7 @@ export default function App() {
           keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
           // playback
           defaultQuality={defaultQuality} setDefaultQuality={setDefaultQuality}
-          // API key
+          // API key (now visible & used)
           ytApiKeyOverride={ytApiKeyOverride} setYtApiKeyOverride={setYtApiKeyOverride}
           // enable flags
           s1Enabled={s1Enabled} setS1Enabled={setS1Enabled}
@@ -855,7 +925,7 @@ function SettingsModal(props){
     // streams
     s1Input, setS1Input, s2Input, setS2Input, applyStreams, clearToLanding,
     // layout sizes
-    l3S2Height, setL3S2Height, l3RightWidth, setL3RightWidth,
+    l2ChatWidth, setL2ChatWidth, l3S2Height, setL3S2Height, l3RightWidth, setL3RightWidth,
     // appearance
     frameW, setFrameW, frameColor, setFrameColor, bgUrl, setBgUrl, onUploadLocalBg,
     themes, saveThemePreset, applyThemePreset, deleteThemePreset,
@@ -928,6 +998,18 @@ function SettingsModal(props){
           {/* Layout sizes */}
           <section className="settings-group">
             <h4>Layout</h4>
+            <div className="row">
+              <div className="label">Layout 2 – Chat width</div>
+              <input type="range" min="260" max="720" step="2"
+                     value={l2ChatWidth}
+                     onChange={(e)=>setL2ChatWidth(Number(e.target.value))}
+              />
+              <input className="num" type="number" min="260" max="720" step="2"
+                     value={l2ChatWidth}
+                     onChange={(e)=>setL2ChatWidth(clamp(Number(e.target.value),260,720))}
+              />
+              <span className="unit">px</span>
+            </div>
             <div className="row">
               <div className="label">Layout 3 – Stream 2 height</div>
               <input type="range" min="120" max="800" step="2"
@@ -1014,6 +1096,21 @@ function SettingsModal(props){
             <p className="muted">We request the selected quality from YouTube. If that rendition isn’t available, YouTube may pick the closest available.</p>
           </section>
 
+          {/* YouTube Data API key */}
+          <section className="settings-group">
+            <h4>YouTube Data API Key</h4>
+            <p className="muted">Optional—used for titles and live metrics. Stored locally in your browser (localStorage).</p>
+            <div className="row">
+              <input
+                className="field"
+                placeholder="AIza... (your API key)"
+                value={ytApiKeyOverride}
+                onChange={(e)=>setYtApiKeyOverride(e.target.value.trim())}
+              />
+              <button className="btn" onClick={()=>setYtApiKeyOverride('')}>Clear</button>
+            </div>
+          </section>
+
           {/* Keybinds */}
           <section className="settings-group">
             <h4>Keybinds</h4>
@@ -1025,9 +1122,11 @@ function SettingsModal(props){
                 ['swap','Swap Streams'],['toggleShortcuts','Toggle Shortcuts'],['openSettings','Open Settings'],
                 ['focusAudio','Focus Audio'],['muteAll','Mute All'],['unmuteAll','Unmute All'],
                 ['nudgeBack','Seek −10s'],['nudgeForward','Seek +10s'],
+                ['toggleChat','Toggle Chat (Layout 3)'],
                 ['toggleInfo','Toggle Titles + Metrics'],
-                ['s2HeightDec','S2 height −'],['s2HeightInc','S2 height +'],
-                ['l3RightDec','Layout 3 Right width −'],['l3RightInc','Layout 3 Right width +'],
+                ['chatWidthDec','L2 Chat width −'],['chatWidthInc','L2 Chat width +'],
+                ['s2HeightDec','L3 S2 height −'],['s2HeightInc','L3 S2 height +'],
+                ['l3RightDec','L3 Right width −'],['l3RightInc','L3 Right width +'],
                 ['borderDec','Border −'],['borderInc','Border +'],
               ].map(([id,label])=>{
                 const val = keymap[id] || '';
