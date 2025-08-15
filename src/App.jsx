@@ -8,8 +8,7 @@ const DEFAULT_PIP = { x: 24, y: 24, width: 480, height: 270 };
 const DEFAULT_L2_CHAT = 360;   // px
 const DEFAULT_L3_S2H  = 240;   // px
 const METRICS_MS = 30000;      // 30s
-const YT_API_KEY = process.env.REACT_APP_YT_API_KEY || '';
-
+const YT_API_KEY = 'AIzaSyA_WWfYxtFqm680Yqzoa0_uUg3iq3T3tIY';
 
 /* -------------- YouTube IFrame API ---------------- */
 function loadYouTubeAPI() {
@@ -85,6 +84,21 @@ const DEFAULT_KEYMAP = {
 };
 const norm = (k) => (k || '').toLowerCase();
 
+/* Small helper for PIP cursors */
+const cursorForDir = (dir) => {
+  switch (dir) {
+    case 'n': return 'n-resize';
+    case 's': return 's-resize';
+    case 'e': return 'e-resize';
+    case 'w': return 'w-resize';
+    case 'ne': return 'ne-resize';
+    case 'nw': return 'nw-resize';
+    case 'se': return 'se-resize';
+    case 'sw': return 'sw-resize';
+    default: return 'default';
+  }
+};
+
 /* ================================================== */
 export default function App() {
   /* Streams */
@@ -107,6 +121,9 @@ export default function App() {
   /* PIP */
   const [pip, setPip] = useState(() => lsGet('ms_pip', DEFAULT_PIP));
   const [pipMoving, setPipMoving] = useState(false); // disables transitions while dragging/resizing
+  const [pipLockAR, setPipLockAR] = useState(false); // hold Shift to lock 16:9
+  // Stage‑wide interaction shield while dragging/resizing (prevents iframes from eating events)
+  const [shield, setShield] = useState({ active:false, cursor:'default' });
 
   /* Theme / Appearance */
   const [bgUrl, setBgUrl] = useState(() => lsGet('ms_bg', ''));
@@ -407,6 +424,10 @@ export default function App() {
     requestAnimationFrame(measureAll);
     toast('Layout reset');
   };
+  const resetKeymap = () => {
+    setKeymap({ ...DEFAULT_KEYMAP });
+    toast('Keybinds reset');
+  };
 
   /* ---- Chat visibility ---- */
   let showChat1 = false, showChat2 = false;
@@ -421,6 +442,9 @@ export default function App() {
 
   /* ---- Global border width: disabled on L1 and L6 ---- */
   const globalBorderW = (layout === 1 || layout === 6) ? 0 : frameW;
+
+  /* ---- Helpers for chat pop-out ---- */
+  const chatPopoutUrl = (id) => id ? `https://www.youtube.com/live_chat?v=${id}&is_popout=1` : null;
 
   /* ---- Render ---- */
   return (
@@ -518,20 +542,39 @@ export default function App() {
 
           {/* UI slots + chat + controls */}
           <div className="ui-layer">
+            {/* Interaction shield during PIP drag/resize */}
+            <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
+
             {/* --- Layout content (slots) --- */}
             {(() => {
               switch (layout) {
                 case 1:
                   return (<div className="layout layout-1"><div className="slot slot-s1" ref={slotS1} /></div>);
-                case 2:
+                case 2: {
+                  const leftId = swap ? s2 : s1;
+                  const leftPopout = chatPopoutUrl(leftId);
                   return (
                     <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
                       <div /> {/* spacer */}
-                      <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
+                      <div className="chat-panel">
+                        <div className="chat-toolbar">
+                          <button
+                            className="btn"
+                            onClick={() => leftPopout && window.open(leftPopout, '_blank', 'noopener,noreferrer')}
+                            disabled={!leftPopout}
+                            title="Open YouTube Pop‑out Chat (sign‑in & chat)"
+                            style={{ pointerEvents:'auto' }}
+                          >Pop‑out Chat</button>
+                        </div>
+                        <div className="chat-slot" ref={chatSlot} />
+                      </div>
                     </div>
                   );
-                case 3:
+                }
+                case 3: {
+                  const activeId = (chatTab === 1 ? s1 : s2);
+                  const activePopout = chatPopoutUrl(activeId);
                   return (
                     <div className="layout layout-3">
                       <div className="slot slot-s1" ref={slotS1} />
@@ -546,11 +589,21 @@ export default function App() {
                             <button className={chatTab===1?'active':''} onClick={()=>setChatTab(1)}>Stream 1 Chat</button>
                             <button className={chatTab===2?'active':''} onClick={()=>setChatTab(2)} disabled={!s2}>Stream 2 Chat</button>
                           </div>
+                          <div className="chat-toolbar">
+                            <button
+                              className="btn"
+                              onClick={() => activePopout && window.open(activePopout, '_blank', 'noopener,noreferrer')}
+                              disabled={!activePopout}
+                              title="Open YouTube Pop‑out Chat (sign‑in & chat)"
+                              style={{ pointerEvents:'auto' }}
+                            >Pop‑out Chat</button>
+                          </div>
                           <div className="chat-slot" ref={chatSlot} />
                         </div>
                       </div>
                     </div>
                   );
+                }
                 case 4:
                   return (
                     <div className="layout layout-4">
@@ -562,15 +615,17 @@ export default function App() {
                         minWidth={220}
                         minHeight={124}
                         dragHandleClassName="pip-drag-handle"
-                        onDragStart={()=>setPipMoving(true)}
-                        onResizeStart={()=>setPipMoving(true)}
+                        enableResizing={{ top:true, right:true, bottom:true, left:true, topRight:true, bottomRight:true, bottomLeft:true, topLeft:true }}
+                        lockAspectRatio={pipLockAR ? 16/9 : false}
+                        onDragStart={() => { setPipMoving(true); setShield({active:true, cursor:'grabbing'}); }}
+                        onResizeStart={(e, dir) => { setPipMoving(true); setPipLockAR(!!e?.shiftKey); setShield({active:true, cursor:cursorForDir(dir)}); }}
                         onDrag={(e, d) => setPip(p=>({ ...p, x:d.x, y:d.y }))}
                         onResize={(e, dir, ref, delta, pos) =>
                           setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) })
                         }
-                        onDragStop={(e, d) => { setPip(p=>({ ...p, x:d.x, y:d.y })); setPipMoving(false); }}
+                        onDragStop={(e, d) => { setPip(p=>({ ...p, x:d.x, y:d.y })); setPipMoving(false); setShield({active:false, cursor:'default'}); }}
                         onResizeStop={(e, dir, ref, delta, pos) =>
-                          { setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) }); setPipMoving(false); }
+                          { setPip({ x:pos.x, y:pos.y, width:parseFloat(ref.style.width), height:parseFloat(ref.style.height) }); setPipMoving(false); setShield({active:false, cursor:'default'}); }
                         }
                         className="pip-overlay"
                       >
@@ -612,12 +667,22 @@ export default function App() {
             {/* Chat (mounted once) */}
             <div className="chat-layer">
               {chat1Src && (
-                <iframe className={`chat-frame-abs ${showChat1?'show':'hide'}`} title="Stream 1 Chat"
-                        src={chat1Src} style={styleFromRect(rectChat, lastChat, true)} />
+                <iframe
+                  className={`chat-frame-abs ${showChat1?'show':'hide'}`}
+                  title="Stream 1 Chat"
+                  src={chat1Src}
+                  allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
+                  style={styleFromRect(rectChat, lastChat, true)}
+                />
               )}
               {chat2Src && (
-                <iframe className={`chat-frame-abs ${showChat2?'show':'hide'}`} title="Stream 2 Chat"
-                        src={chat2Src} style={styleFromRect(rectChat, lastChat, true)} />
+                <iframe
+                  className={`chat-frame-abs ${showChat2?'show':'hide'}`}
+                  title="Stream 2 Chat"
+                  src={chat2Src}
+                  allow="autoplay; encrypted-media; picture-in-picture; clipboard-write; fullscreen"
+                  style={styleFromRect(rectChat, lastChat, true)}
+                />
               )}
             </div>
 
@@ -670,7 +735,7 @@ export default function App() {
           showMetrics={showMetrics} setShowMetrics={setShowMetrics}
           showTitles={showTitles} setShowTitles={setShowTitles}
           // keymap
-          keymap={keymap} setKeymap={setKeymap}
+          keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
         />
       )}
     </div>
@@ -692,7 +757,7 @@ function SettingsModal(props){
     // overlays
     showMetrics, setShowMetrics, showTitles, setShowTitles,
     // keymap
-    keymap, setKeymap,
+    keymap, setKeymap, resetKeymap,
   } = props;
 
   const keyCount = useMemo(() => {
@@ -833,6 +898,10 @@ function SettingsModal(props){
                   </div>
                 );
               })}
+            </div>
+            <div className="row gap">
+              <button className="btn" onClick={resetKeymap}>Reset Keybinds</button>
+              <span className="muted">Duplicates in use: {Array.from(keyCount.values()).filter(n=>n>1).length}</span>
             </div>
           </section>
 

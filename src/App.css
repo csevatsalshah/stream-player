@@ -82,6 +82,7 @@ label{font-size:13px;color:#d1d5db}
   border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative;min-height:0
 }
 .chat-slot{flex:1;min-height:0}
+.chat-toolbar{display:flex;justify-content:flex-end;padding:6px;border-bottom:1px solid #1f2a3d;background:#0e1522;gap:6px}
 
 /* L3 */
 .layout-3{display:grid;grid-template-columns:1fr 360px;gap:8px;padding:8px;height:100%;min-height:0}
@@ -112,12 +113,23 @@ label{font-size:13px;color:#d1d5db}
   background:rgba(0,0,0,.6);color:#fff;border-radius:999px;padding:0 10px;font-weight:700;
   cursor:move;pointer-events:auto;user-select:none
 }
-/* Make resize grips easier to grab */
-.pip-overlay .react-rnd-resize-handle{pointer-events:auto;width:12px;height:12px}
-.pip-overlay .react-rnd-resize-handle-se,
-.pip-overlay .react-rnd-resize-handle-ne,
-.pip-overlay .react-rnd-resize-handle-sw,
-.pip-overlay .react-rnd-resize-handle-nw{border:2px solid rgba(255,255,255,.85);border-radius:3px}
+/* Make resize grips easier to grab + keep above everything */
+.pip-overlay .react-rnd-resize-handle{pointer-events:auto;width:18px;height:18px;z-index:20}
+.pip-overlay .react-rnd-resize-handle-se{cursor:se-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
+.pip-overlay .react-rnd-resize-handle-ne{cursor:ne-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
+.pip-overlay .react-rnd-resize-handle-sw{cursor:sw-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
+.pip-overlay .react-rnd-resize-handle-nw{cursor:nw-resize;border:2px solid rgba(255,255,255,.85);border-radius:3px}
+.pip-overlay .react-rnd-resize-handle-n{cursor:n-resize}
+.pip-overlay .react-rnd-resize-handle-s{cursor:s-resize}
+.pip-overlay .react-rnd-resize-handle-e{cursor:e-resize}
+.pip-overlay .react-rnd-resize-handle-w{cursor:w-resize}
+
+/* Shield to block iframes while resizing/dragging */
+.interaction-shield{
+  position:absolute;inset:0;z-index:4; /* under the PIP overlay (z=5), above players/chat/metrics */
+  pointer-events:none;background:transparent;
+}
+.interaction-shield.show{pointer-events:auto}
 
 /* L5 */
 .layout-5{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;height:100%;min-height:0}
