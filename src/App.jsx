@@ -9,11 +9,14 @@ const DEFAULT_L2_CHAT = 360;      // Layout 2 chat width (px)
 const DEFAULT_L3_S2H  = 240;      // Layout 3 Stream 2 height (px)
 const DEFAULT_L3_RIGHT_W = 360;   // Layout 3 right column width (px)
 const METRICS_MS = 30000;         // 30s metrics polling
-const DRIFT_MS = 500;             // drift meter interval
+const DRIFT_MS = 500;             // drift/behind polling
 const DEFAULT_BG =
   'https://media.discordapp.net/attachments/952501333179662338/1405875409681121280/background-stream.png?ex=68a06b01&is=689f1981&hm=854645e9229bf3a556a5be242c97c630eb27cfd8e81b8a205ee7099cd66b4bf6&=&format=webp&quality=lossless&width=1240&height=698';
 
-// Optional env key (user can override in Settings)
+/* Prefer the highest quality unless a user picks something else */
+const PREFERRED_DEFAULT_QUALITY = 'highres';
+
+/* Optional env key (user can override in Settings) */
 const YT_API_KEY_DEFAULT = process.env.REACT_APP_YT_API_KEY || '';
 
 /* -------------- YouTube IFrame API ---------------- */
@@ -114,32 +117,32 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
   return data;
 }
 
-/* ------------------- Keymap ------------------------ */
+/* ------------------- Keymap (supports 2 keys/action) ------------------------ */
 const DEFAULT_KEYMAP = {
-  layout1:'1', layout2:'2', layout3:'3', layout4:'4', layout5:'5', layout6:'6',
-  swap:'q',
-  toggleShortcuts:'s',
-  openSettings:'o',
-  focusAudio:'a',            // cycles S1 -> Both -> S2
-  muteAll:'m',
-  unmuteAll:'u',
-  nudgeBack:'[',
-  nudgeForward:']',
-  toggleChat:'c',            // Layout 3 chat toggle OR chat tab switch
-  toggleInfo:'i',            // toggle titles + metrics
-  chatWidthDec:',',          // Layout 2 chat width –
-  chatWidthInc:'.',          // Layout 2 chat width +
-  s2HeightDec:'ArrowDown',   // Layout 3 sizes
-  s2HeightInc:'ArrowUp',
-  l3RightDec:'-',
-  l3RightInc:'=',
-  borderDec:'ArrowLeft',
-  borderInc:'ArrowRight',
-  setMarkS1:'9',
-  setMarkS2:'0',
-  syncS2ToS1:'(' /* Shift+9 */,
-  syncS1ToS2:')' /* Shift+0 */,
-  syncNow:'g',
+  layout1:['1'], layout2:['2'], layout3:['3'], layout4:['4'], layout5:['5'], layout6:['6'],
+  swap:['q'],
+  toggleShortcuts:['s'],
+  openSettings:['o'],
+  focusAudio:['a'],            // cycles S1 -> Both -> S2
+  muteAll:['m'],
+  unmuteAll:['u'],
+  nudgeBack:['['],
+  nudgeForward:[']'],
+  toggleChat:['c'],            // Layout 3 chat toggle OR chat tab switch
+  toggleInfo:['i'],            // toggle titles + metrics
+  chatWidthDec:[','],          // Layout 2 chat width –
+  chatWidthInc:['.'],          // Layout 2 chat width +
+  s2HeightDec:['ArrowDown'],   // Layout 3 sizes
+  s2HeightInc:['ArrowUp'],
+  l3RightDec:['-'],
+  l3RightInc:['='],
+  borderDec:['ArrowLeft'],
+  borderInc:['ArrowRight'],
+  setMarkS1:['9'],
+  setMarkS2:['0'],
+  syncS2ToS1:['(' /* Shift+9 */],
+  syncS1ToS2:[')' /* Shift+0 */],
+  syncNow:['g'],
 };
 
 /* Quality helpers */
@@ -155,14 +158,13 @@ const QUALITY_LABELS = {
   highres: 'Highest'
 };
 const QUALITY_ORDER = ['default','small','medium','large','hd720','hd1080','hd1440','hd2160','highres'];
-const PREFERRED_DEFAULT_QUALITY = 'hd1080';
 const prettyQuality = (q) => QUALITY_LABELS[q] || q || 'Auto';
 
 /* Cursor helper for PIP */
 const cursorForDir = (dir) => ({
   top: 'n-resize', bottom:'s-resize', left:'w-resize', right:'e-resize',
   topRight:'ne-resize', topLeft:'nw-resize', bottomRight:'se-resize', bottomLeft:'sw-resize',
-  n:'n-resize', s:'s-resize', e:'e-resize', w:'e-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
+  n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
 }[dir] || 'default');
 
 /* ================================================== */
@@ -240,14 +242,21 @@ export default function App() {
   const yt2 = useRef(null);
   const [ytReady, setYtReady] = useState(false);
 
-  /* Keymap (sanitize) */
+  /* Keymap (sanitize; migrate old string form to arrays) */
   const [keymap, setKeymap] = useState(() => {
     const stored = lsGet('ms_keymap', {});
-    const safe = (stored && typeof stored === 'object') ? stored : {};
-    const clean = Object.fromEntries(
-      Object.entries(safe).filter(([,v]) => typeof v === 'string' && v.trim().length)
-    );
-    return { ...DEFAULT_KEYMAP, ...clean };
+    const merged = { ...DEFAULT_KEYMAP, ...(stored && typeof stored === 'object' ? stored : {}) };
+    const norm = {};
+    for (const [k, v] of Object.entries(merged)) {
+      if (Array.isArray(v)) {
+        norm[k] = v.filter(s => typeof s === 'string' && s.trim().length).slice(0,2);
+      } else if (typeof v === 'string' && v.trim().length) {
+        norm[k] = [v.trim()];
+      } else {
+        norm[k] = [];
+      }
+    }
+    return norm;
   });
 
   /* Audio */
@@ -271,6 +280,8 @@ export default function App() {
   const [syncMove, setSyncMove] = useState('auto'); // 'auto'|'s2'|'s1'
   const [behind1, setBehind1] = useState(0);
   const [behind2, setBehind2] = useState(0);
+  const head1 = useRef(0); // track highest observed time as live head approximation
+  const head2 = useRef(0);
 
   /* History (24h) */
   const [history, setHistory] = useState(() => lsGet('ms_hist', []));
@@ -304,7 +315,9 @@ export default function App() {
     tick();
   }, []);
 
-  /* ---- Build/destroy players depending on enable flags ---- */
+  /* ---- Build/destroy players depending on enable flags ----
+     IMPORTANT: Do NOT depend on vol/quality here, to avoid remounts.
+  */
   useEffect(() => {
     if (!ytReady) return;
 
@@ -343,10 +356,17 @@ export default function App() {
       try { yt2.current.destroy(); } catch {}
       yt2.current = null;
     }
-  }, [ytReady, s1Enabled, s2Enabled, s1, s2, defaultQuality, vol1, vol2, assertQuality]);
+  }, [ytReady, s1Enabled, s2Enabled, s1, s2, assertQuality, vol1, vol2, defaultQuality]); // note: volume/quality used only on first ready; this effect does not destroy on change
+
+  /* ---- Re-assert quality if user changes the default ---- */
+  useEffect(() => {
+    assertQuality(yt1, defaultQuality);
+    assertQuality(yt2, defaultQuality);
+  }, [defaultQuality, assertQuality]);
 
   /* ---- Force play when IDs change ---- */
   useEffect(() => {
+    head1.current = 0; // reset live head
     if (yt1.current && s1Enabled && s1) { try {
       yt1.current.loadVideoById(s1);
       yt1.current.setVolume(vol1);
@@ -356,6 +376,7 @@ export default function App() {
   }, [s1, s1Enabled, defaultQuality, vol1, assertQuality]);
 
   useEffect(() => {
+    head2.current = 0; // reset live head
     if (yt2.current && s2Enabled && s2) { try {
       yt2.current.loadVideoById(s2);
       yt2.current.setVolume(vol2);
@@ -430,6 +451,7 @@ export default function App() {
   }, [layout, l2ChatWidth, l3S2Height, l3RightWidth, chatVisibleL3, measureAll]);
 
   useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(() => requestAnimationFrame(measureAll));
     if (slotS1.current) ro.observe(slotS1.current);
     if (slotS2.current) ro.observe(slotS2.current);
@@ -491,6 +513,10 @@ export default function App() {
   const focusS1 = useCallback(() => { setFocus('s1'); setMuted1(false); setMuted2(true); }, []);
   const focusBoth = useCallback(() => { setFocus('both'); setMuted1(false); setMuted2(false); }, []);
   const focusS2 = useCallback(() => { setFocus('s2'); setMuted1(true); setMuted2(false); }, []);
+  const cycleFocus = useCallback(() => {
+    setFocus(prev => (prev === 's1' ? 'both' : prev === 'both' ? 's2' : 's1'));
+    setMuted1(false); setMuted2(false);
+  }, []);
 
   const muteAll = useCallback(() => { setMuted1(true); setMuted2(true); }, []);
   const unmuteAll = useCallback(() => { setMuted1(false); setMuted2(false); setFocus('both'); }, []);
@@ -504,7 +530,10 @@ export default function App() {
     });
   }, [focus]);
 
-  /* ---- Drift meter + behind live ---- */
+  /* ---- Drift meter + behind live (robust & cheap) ----
+     For live "behind", YouTube doesn't expose latency. We approximate by tracking the
+     highest time we've observed ("live head"). Behind = head - current. Capped to 10 min.
+  */
   useEffect(() => {
     let t;
     function tick() {
@@ -512,16 +541,15 @@ export default function App() {
         const t1 = yt1.current?.getCurrentTime?.();
         const t2 = yt2.current?.getCurrentTime?.();
         if (typeof t1 === 'number' && typeof t2 === 'number') setDrift((t1 - t2));
-        // behind live (approx): duration - current time (cap 10m for sanity)
-        const d1 = yt1.current?.getDuration?.(); 
-        const d2 = yt2.current?.getDuration?.();
-        if (typeof d1 === 'number' && typeof t1 === 'number' && d1 > 0) {
-          const b1 = Math.max(0, Math.min(600, d1 - t1));
-          setBehind1(b1);
+
+        if (typeof t1 === 'number') {
+          head1.current = Math.max(head1.current, t1);
+          setBehind1(Math.max(0, Math.min(600, head1.current - t1)));
         } else setBehind1(0);
-        if (typeof d2 === 'number' && typeof t2 === 'number' && d2 > 0) {
-          const b2 = Math.max(0, Math.min(600, d2 - t2));
-          setBehind2(b2);
+
+        if (typeof t2 === 'number') {
+          head2.current = Math.max(head2.current, t2);
+          setBehind2(Math.max(0, Math.min(600, head2.current - t2)));
         } else setBehind2(0);
       } catch {}
       t = setTimeout(tick, DRIFT_MS);
@@ -550,11 +578,11 @@ export default function App() {
 
   const goLiveS1 = useCallback(() => {
     const p = yt1.current; if (!p) return;
-    try { p.seekTo(1e9, true); } catch {}
+    try { p.seekTo(1e9, true); head1.current = 0; } catch {}
   }, []);
   const goLiveS2 = useCallback(() => {
     const p = yt2.current; if (!p) return;
-    try { p.seekTo(1e9, true); } catch {}
+    try { p.seekTo(1e9, true); head2.current = 0; } catch {}
   }, []);
 
   const syncNow = useCallback(() => {
@@ -592,62 +620,6 @@ export default function App() {
   };
   const removeHistItem = (id) => setHistory(h => (h||[]).filter(x => x.id !== id));
   const clearHistory = () => setHistory([]);
-
-  /* ---- Latest live by channel (requires API key) ---- */
-  const [liveLookup, setLiveLookup] = useState('');
-  const [liveResult, setLiveResult] = useState(null);
-
-  const parseChannelFromUrlOrText = (q) => {
-    const str = q.trim();
-    if (!str) return { type:'empty' };
-    try {
-      const u = new URL(str);
-      if (u.hostname.includes('youtube.com')) {
-        const parts = u.pathname.split('/').filter(Boolean);
-        if (parts[0] === 'channel' && parts[1]?.startsWith('UC')) return { type:'channelId', value: parts[1] };
-        if (parts[0]?.startsWith('@')) return { type:'handle', value: parts[0] };
-        return { type:'text', value: str };
-      }
-    } catch {}
-    if (str.startsWith('UC') && str.length >= 20) return { type:'channelId', value: str };
-    if (str.startsWith('@')) return { type:'handle', value: str };
-    return { type:'text', value: str };
-  };
-
-  async function findLatestLive() {
-    try {
-      if (!ytApiKey) { alert('Add a YouTube Data API key in Settings to use this.'); return; }
-      const parsed = parseChannelFromUrlOrText(liveLookup);
-      if (parsed.type === 'empty') return;
-
-      let channelId = null;
-      if (parsed.type === 'channelId') channelId = parsed.value;
-      else if (parsed.type === 'handle') {
-        const handle = parsed.value.startsWith('@') ? parsed.value : `@${parsed.value}`;
-        const url = `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${ytApiKey}`;
-        const r = await fetch(url); const j = await r.json();
-        channelId = j?.items?.[0]?.id || null;
-      } else {
-        const urlCh = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(parsed.value)}&key=${ytApiKey}`;
-        const chRes = await fetch(urlCh); const chJ = await chRes.json();
-        channelId = chJ?.items?.[0]?.id?.channelId || null;
-      }
-
-      if (!channelId) { setLiveResult({ status:'error', msg:'Channel not found' }); return; }
-
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&order=date&maxResults=1&key=${ytApiKey}`;
-      const res = await fetch(url); const j = await res.json();
-      const it = j?.items?.[0];
-      if (!it) { setLiveResult({ status:'no_live' }); return; }
-      const vid = it.id?.videoId || null;
-      if (!vid) { setLiveResult({ status:'no_live' }); return; }
-      const title = it.snippet?.title || 'Live';
-      const thumb = it.snippet?.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
-      setLiveResult({ status:'ok', vid, title, thumb });
-    } catch {
-      setLiveResult({ status:'error', msg:'Lookup failed' });
-    }
-  }
 
   /* ---- Toasters & actions ---- */
   const [toastMsg, setToastMsg] = useState('');
@@ -715,7 +687,6 @@ export default function App() {
     requestAnimationFrame(measureAll);
     toast('Layout reset');
   };
-  const resetKeymap = () => { setKeymap({ ...DEFAULT_KEYMAP }); toast('Keybinds reset'); };
 
   /* ---- Theme helpers ---- */
   const onUploadLocalBg = (file) => {
@@ -764,7 +735,7 @@ export default function App() {
     document.addEventListener('touchend', onUp);
   };
 
-  /* ---------- helper fns used in JSX ---------- */
+  /* ---------- helpers used in JSX ---------- */
   function styleFromRect(rect, keepRef, allowFallback) {
     let rr = rect;
     if (!rr && allowFallback) rr = keepRef?.current;
@@ -800,15 +771,90 @@ export default function App() {
   function isPipP1(){ return targets().pipIsP1; }
   function isPipP2(){ return targets().pipIsP2; }
 
+  /* ---------- Keyboard shortcuts (global) ---------- */
+  const getKeys = useCallback((id) => {
+    const v = keymap[id]; return Array.isArray(v) ? v : [];
+  }, [keymap]);
+  useEffect(() => {
+    if (!shortcutsEnabled) return;
+
+    const isTypingTarget = (el) => {
+      if (!el) return false;
+      const tag = el.tagName?.toLowerCase();
+      return el.isContentEditable || ['input','textarea','select'].includes(tag);
+    };
+
+    const pressed = (id, key) => getKeys(id).some(k => (k || '').toLowerCase() === (key || '').toLowerCase());
+
+    const onKey = (e) => {
+      if (!shortcutsEnabled) return;
+      if (isTypingTarget(e.target)) return;
+
+      const k = e.key;
+
+      // Layouts
+      for (let n=1; n<=6; n++) {
+        if (pressed(`layout${n}`, k)) { setLayout(n); e.preventDefault(); return; }
+      }
+      if (pressed('swap', k)) { setSwap(v=>!v); e.preventDefault(); return; }
+      if (pressed('toggleShortcuts', k)) { setShortcutsEnabled(v=>!v); e.preventDefault(); return; }
+      if (pressed('openSettings', k)) { setShowSettings(true); e.preventDefault(); return; }
+
+      if (pressed('focusAudio', k)) { cycleFocus(); e.preventDefault(); return; }
+      if (pressed('muteAll', k)) { muteAll(); e.preventDefault(); return; }
+      if (pressed('unmuteAll', k)) { unmuteAll(); e.preventDefault(); return; }
+      if (pressed('nudgeBack', k)) { nudge(-10); e.preventDefault(); return; }
+      if (pressed('nudgeForward', k)) { nudge(10); e.preventDefault(); return; }
+
+      if (pressed('toggleChat', k)) {
+        if (layout === 3) {
+          if (!chatVisibleL3) setChatVisibleL3(true);
+          else setChatTab(t => (s2 ? (t === 1 ? 2 : 1) : 1));
+        }
+        e.preventDefault(); return;
+      }
+      if (pressed('toggleInfo', k)) {
+        const next = !(showTitles || showMetrics);
+        setShowTitles(next); setShowMetrics(next);
+        e.preventDefault(); return;
+      }
+
+      if (pressed('chatWidthDec', k)) { if (layout===2) setL2ChatWidth(v=>clamp(v-20,260,720)); e.preventDefault(); return; }
+      if (pressed('chatWidthInc', k)) { if (layout===2) setL2ChatWidth(v=>clamp(v+20,260,720)); e.preventDefault(); return; }
+      if (pressed('s2HeightDec', k)) { if (layout===3) setL3S2Height(v=>clamp(v-10,120,800)); e.preventDefault(); return; }
+      if (pressed('s2HeightInc', k)) { if (layout===3) setL3S2Height(v=>clamp(v+10,120,800)); e.preventDefault(); return; }
+      if (pressed('l3RightDec', k)) { if (layout===3) setL3RightWidth(v=>clamp(v-10,260,720)); e.preventDefault(); return; }
+      if (pressed('l3RightInc', k)) { if (layout===3) setL3RightWidth(v=>clamp(v+10,260,720)); e.preventDefault(); return; }
+      if (pressed('borderDec', k)) { setFrameW(v=>clamp(v-1,0,12)); e.preventDefault(); return; }
+      if (pressed('borderInc', k)) { setFrameW(v=>clamp(v+1,0,12)); e.preventDefault(); return; }
+
+      if (pressed('setMarkS1', k)) { setMarkerS1(); e.preventDefault(); return; }
+      if (pressed('setMarkS2', k)) { setMarkerS2(); e.preventDefault(); return; }
+      if (pressed('syncS2ToS1', k)) { syncS2ToS1Mark(); e.preventDefault(); return; }
+      if (pressed('syncS1ToS2', k)) { syncS1ToS2Mark(); e.preventDefault(); return; }
+      if (pressed('syncNow', k)) { syncNow(); e.preventDefault(); return; }
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    shortcutsEnabled, getKeys, s2, layout, chatVisibleL3,
+    showTitles, showMetrics,
+    setMarkerS1, setMarkerS2, syncS2ToS1Mark, syncS1ToS2Mark, syncNow,
+    cycleFocus, muteAll, unmuteAll, nudge
+  ]);
+
   /* ---- Render ---- */
   return (
-    <div className="App">
+    <div className={`App ${s1 ? 'is-playing' : 'is-landing'}`}>
       {!s1 && (
         <div className="landing">
-          <div className="landing-card">
-            <h1 className="headline">Multi-Stream Player <span className="headline-accent">Pro</span></h1>
-            <p className="sub">Two streams, clean layouts, precise sync, and elegant overlays.</p>
+          <div className="landing-hero">
+            <h1 className="headline">Multi‑Stream Player <span className="headline-accent">Pro</span></h1>
+            <p className="sub">Dual streams, clean layouts, precise sync, and elegant overlays — optimized for low‑end devices.</p>
+          </div>
 
+          <div className="landing-card">
             <div className="form">
               <label htmlFor="s1">Primary Stream (required)</label>
               <input id="s1" className="field primary" placeholder="YouTube link or video ID"
@@ -846,32 +892,34 @@ export default function App() {
                 </div>
               </>
             )}
-
-            <div className="live-lookup">
-              <label>Get latest live by Channel ID / @handle / channel name (requires API key in Settings)</label>
-              <div className="row gap">
-                <input className="field" placeholder="UC... or @handle or channel name"
-                  value={liveLookup} onChange={e=>setLiveLookup(e.target.value)} />
-                <button className="btn" onClick={findLatestLive}>Find</button>
-              </div>
-              {liveResult?.status === 'ok' && (
-                <div className="live-result">
-                  <img src={liveResult.thumb} alt={liveResult.title} />
-                  <div className="live-meta">
-                    <div className="hist-title">{liveResult.title}</div>
-                    <div className="hist-actions">
-                      <button className="btn" onClick={()=>setS1Input(liveResult.vid)}>Use as S1</button>
-                      <button className="btn" onClick={()=>setS2Input(liveResult.vid)}>Use as S2</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {liveResult?.status === 'no_live' && <div className="muted">No live stream found.</div>}
-              {liveResult?.status === 'error' && <div className="muted">{liveResult.msg || 'Lookup failed. Check API key or try again.'}</div>}
-            </div>
-
-            <div className="made-by">Made by <b>Vat5aL</b></div>
           </div>
+
+          <div className="guide">
+            <h3>Quick Guide</h3>
+            <ol>
+              <li>Paste two YouTube links/IDs above and click <b>Play</b>.</li>
+              <li>Use the top bar to switch layouts (1–6). Layout 4 gives PIP — drag & resize it. Hold <b>Shift</b> to lock 16:9.</li>
+              <li>Bottom bar controls audio focus, markers, sync, quality and overlays.</li>
+              <li>Open <b>Settings</b> (⚙️) to change theme, sizes, keybinds, and more.</li>
+            </ol>
+
+            <h3>Keyboard Shortcuts (default)</h3>
+            <div className="kbd-grid">
+              <div><b>1–6</b> Layouts</div>
+              <div><b>Q</b> Swap Streams</div>
+              <div><b>A</b> Focus: S1 → Both → S2</div>
+              <div><b>[ / ]</b> Seek −10s / +10s</div>
+              <div><b>M / U</b> Mute / Unmute</div>
+              <div><b>C</b> Toggle chat / switch tab (L3)</div>
+              <div><b>I</b> Toggle titles + metrics</div>
+              <div><b>9 / 0</b> Set S1 / S2 marker</div>
+              <div><b>Shift+9 / Shift+0</b> S2→S1 / S1→S2</div>
+              <div><b>G</b> Sync now</div>
+              <div><b>O</b> Settings, <b>S</b> Toggle shortcuts</div>
+            </div>
+          </div>
+
+          <div className="made-by">Made by <b>Vat5aL</b></div>
         </div>
       )}
 
@@ -977,7 +1025,7 @@ export default function App() {
                         {(info1.viewers===null && info1.likes===null) && <span className="chip">…</span>}
                       </>
                     ) : (
-                      <span className="chip">🔑 Add API key in Settings</span>
+                      <span className="chip">🔑 Add API key in Settings for metrics</span>
                     )}
                   </div>
                 )}
@@ -997,7 +1045,7 @@ export default function App() {
                         {(info2.viewers===null && info2.likes===null) && <span className="chip">…</span>}
                       </>
                     ) : (
-                      <span className="chip">🔑 Add API key in Settings</span>
+                      <span className="chip">🔑 Add API key in Settings for metrics</span>
                     )}
                   </div>
                 )}
@@ -1007,7 +1055,7 @@ export default function App() {
 
           {/* UI layer */}
           <div className="ui-layer">
-            <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
+            <div className="interaction-shield" style={{ cursor: shield.cursor, ...(shield.active?{pointerEvents:'auto'}:{}) }} />
 
             {/* Layout slots & chat */}
             {(() => {
@@ -1096,7 +1144,7 @@ export default function App() {
               )}
               {chat2Src && (
                 <iframe
-                  className={`chat-frame-abs ${ (layout===2 && false) || (layout===3 && chatVisibleL3 && chatTab===2) ? 'show' : 'hide' }`}
+                  className={`chat-frame-abs ${ (layout===3 && chatVisibleL3 && chatTab===2) ? 'show' : 'hide' }`}
                   title="Stream 2 Chat"
                   src={chat2Src}
                   allow="autoplay; encrypted-media; picture-in-picture"
@@ -1215,7 +1263,7 @@ export default function App() {
                   <span className="qb-label">Quality</span>
                   <select
                     value={q1}
-                    onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ yt1.current?.setPlaybackQuality(v);}catch{} }}
+                    onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ assertQuality(yt1, v==='default' ? defaultQuality : v);}catch{} }}
                     disabled={!s1Enabled || !s1}
                     className="field small"
                     title="S1 quality"
@@ -1224,7 +1272,7 @@ export default function App() {
                   </select>
                   <select
                     value={q2}
-                    onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ yt2.current?.setPlaybackQuality(v);}catch{} }}
+                    onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ assertQuality(yt2, v==='default' ? defaultQuality : v);}catch{} }}
                     disabled={!s2Enabled || !s2}
                     className="field small"
                     title="S2 quality"
@@ -1285,7 +1333,7 @@ export default function App() {
           showMetrics={showMetrics} setShowMetrics={setShowMetrics}
           showTitles={showTitles} setShowTitles={setShowTitles}
           // keymap
-          keymap={keymap} setKeymap={setKeymap} resetKeymap={resetKeymap}
+          keymap={keymap} setKeymap={setKeymap}
           // playback
           defaultQuality={defaultQuality} setDefaultQuality={setDefaultQuality}
           // API key (visible & used)
@@ -1316,7 +1364,7 @@ function SettingsModal(props){
     // overlays
     showMetrics, setShowMetrics, showTitles, setShowTitles,
     // keymap
-    keymap, setKeymap, resetKeymap,
+    keymap, setKeymap,
     // playback
     defaultQuality, setDefaultQuality,
     // API key
@@ -1325,11 +1373,34 @@ function SettingsModal(props){
     s1Enabled, setS1Enabled, s2Enabled, setS2Enabled,
   } = props;
 
+  const allKeys = useMemo(() => {
+    const list = [];
+    Object.values(keymap).forEach(arr => (Array.isArray(arr)?arr:[]).forEach(k => { if (k) list.push(k.toLowerCase()); }));
+    return list;
+  }, [keymap]);
+
   const keyCount = useMemo(() => {
     const m = new Map();
-    Object.values(keymap).forEach(v => { const k = (v||'').toLowerCase(); if (!k) return; m.set(k,(m.get(k)||0)+1); });
+    allKeys.forEach(k => m.set(k,(m.get(k)||0)+1));
     return m;
-  }, [keymap]);
+  }, [allKeys]);
+
+  const setKeyAt = (id, idx, key) => {
+    setKeymap(prev => {
+      const cur = Array.isArray(prev[id]) ? [...prev[id]] : [];
+      cur[idx] = key;
+      const clean = cur.filter((v,i) => typeof v === 'string' && v.trim().length && cur.indexOf(v) === i).slice(0,2);
+      return { ...prev, [id]: clean };
+    });
+  };
+  const addSecondKey = (id) => setKeymap(prev => ({ ...prev, [id]: (prev[id]||[]).slice(0,2).concat('').slice(0,2) }));
+  const removeKeyAt = (id, idx) => setKeymap(prev => {
+    const cur = Array.isArray(prev[id]) ? [...prev[id]] : [];
+    cur.splice(idx,1);
+    return { ...prev, [id]: cur };
+  });
+
+  const row = (children) => <div className="row">{children}</div>;
 
   return (
     <div className="modal-backdrop" onClick={close}>
@@ -1341,17 +1412,19 @@ function SettingsModal(props){
           {/* General */}
           <section className="settings-group">
             <h4>General</h4>
-            <div className="row">
-              <div className="label">Shortcuts</div>
-              <button
-                className={`toggle-btn ${shortcutsEnabled ? 'enabled' : 'disabled'}`}
-                onClick={()=>setShortcutsEnabled(v=>!v)}
-                title="Toggle hotkeys (when OFF you can use YouTube controls directly)"
-                style={{ pointerEvents:'auto' }}
-              >
-                {shortcutsEnabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
+            {row(
+              <>
+                <div className="label">Keyboard shortcuts</div>
+                <button
+                  className={`toggle-btn ${shortcutsEnabled ? 'enabled' : 'disabled'}`}
+                  onClick={()=>setShortcutsEnabled(v=>!v)}
+                  title="Toggle hotkeys (when OFF you can use YouTube controls directly)"
+                  style={{ pointerEvents:'auto' }}
+                >
+                  {shortcutsEnabled ? 'ON' : 'OFF'}
+                </button>
+              </>
+            )}
             <div className="row gap">
               <button className="cta" onClick={share}>Copy Share URL</button>
               <button className="btn" onClick={shareWithSync}>Copy Share + Sync</button>
@@ -1367,78 +1440,46 @@ function SettingsModal(props){
             <input className="field primary" value={s1Input} onChange={(e)=>setS1Input(e.target.value)} placeholder="YouTube link or video ID" />
             <label>Secondary stream</label>
             <input className="field" value={s2Input} onChange={(e)=>setS2Input(e.target.value)} placeholder="YouTube link or video ID" />
-            <div className="row">
-              <div className="label">Stream 1 enabled</div>
-              <button className={`toggle-btn ${s1Enabled?'enabled':'disabled'}`} onClick={()=>setS1Enabled(v=>!v)}>{s1Enabled?'ON':'OFF'}</button>
-            </div>
-            <div className="row">
-              <div className="label">Stream 2 enabled</div>
-              <button className={`toggle-btn ${s2Enabled?'enabled':'disabled'}`} onClick={()=>setS2Enabled(v=>!v)}>{s2Enabled?'ON':'OFF'}</button>
-            </div>
-            <div className="row">
-              <div className="label">Layout 3 chat visible</div>
-              <button className={`toggle-btn ${chatVisibleL3?'enabled':'disabled'}`} onClick={()=>setChatVisibleL3(v=>!v)}>{chatVisibleL3?'ON':'OFF'}</button>
-            </div>
-            <div className="row gap">
-              <button className="cta" onClick={applyStreams}>Apply Streams</button>
-            </div>
+            {row(<><div className="label">Stream 1 enabled</div><button className={`toggle-btn ${s1Enabled?'enabled':'disabled'}`} onClick={()=>setS1Enabled(v=>!v)}>{s1Enabled?'ON':'OFF'}</button></>)}
+            {row(<><div className="label">Stream 2 enabled</div><button className={`toggle-btn ${s2Enabled?'enabled':'disabled'}`} onClick={()=>setS2Enabled(v=>!v)}>{s2Enabled?'ON':'OFF'}</button></>)}
+            {row(<><div className="label">Layout 3 chat visible</div><button className={`toggle-btn ${chatVisibleL3?'enabled':'disabled'}`} onClick={()=>setChatVisibleL3(v=>!v)}>{chatVisibleL3?'ON':'OFF'}</button></>)}
+            <div className="row gap"><button className="cta" onClick={applyStreams}>Apply Streams</button></div>
           </section>
 
           {/* Layout */}
           <section className="settings-group">
             <h4>Layout</h4>
-            <div className="row">
-              <div className="label">Layout 2 – Chat width</div>
-              <input type="range" min="260" max="720" step="2"
-                     value={l2ChatWidth}
-                     onChange={(e)=>setL2ChatWidth(Number(e.target.value))}
-              />
-              <input className="num" type="number" min="260" max="720" step="2"
-                     value={l2ChatWidth}
-                     onChange={(e)=>setL2ChatWidth(clamp(Number(e.target.value),260,720))}
-              />
-              <span className="unit">px</span>
-            </div>
-            <div className="row">
-              <div className="label">Layout 3 – Stream 2 height</div>
-              <input type="range" min="120" max="800" step="2"
-                     value={l3S2Height}
-                     onChange={(e)=>setL3S2Height(Number(e.target.value))}
-              />
-              <input className="num" type="number" min="120" max="800" step="2"
-                     value={l3S2Height}
-                     onChange={(e)=>setL3S2Height(clamp(Number(e.target.value),120,800))}
-              />
-              <span className="unit">px</span>
-            </div>
-            <div className="row">
-              <div className="label">Layout 3 – Right column width</div>
-              <input type="range" min="260" max="720" step="2"
-                     value={l3RightWidth}
-                     onChange={(e)=>setL3RightWidth(Number(e.target.value))}
-              />
-              <input className="num" type="number" min="260" max="720" step="2"
-                     value={l3RightWidth}
-                     onChange={(e)=>setL3RightWidth(clamp(Number(e.target.value),260,720))}
-              />
-              <span className="unit">px</span>
-            </div>
+            {row(
+              <>
+                <div className="label">Layout 2 – Chat width</div>
+                <input type="range" min="260" max="720" step="2" value={l2ChatWidth} onChange={(e)=>setL2ChatWidth(Number(e.target.value))}/>
+                <input className="num" type="number" min="260" max="720" step="2" value={l2ChatWidth} onChange={(e)=>setL2ChatWidth(clamp(Number(e.target.value),260,720))}/>
+                <span className="unit">px</span>
+              </>
+            )}
+            {row(
+              <>
+                <div className="label">Layout 3 – Stream 2 height</div>
+                <input type="range" min="120" max="800" step="2" value={l3S2Height} onChange={(e)=>setL3S2Height(Number(e.target.value))}/>
+                <input className="num" type="number" min="120" max="800" step="2" value={l3S2Height} onChange={(e)=>setL3S2Height(clamp(Number(e.target.value),120,800))}/>
+                <span className="unit">px</span>
+              </>
+            )}
+            {row(
+              <>
+                <div className="label">Layout 3 – Right column width</div>
+                <input type="range" min="260" max="720" step="2" value={l3RightWidth} onChange={(e)=>setL3RightWidth(Number(e.target.value))}/>
+                <input className="num" type="number" min="260" max="720" step="2" value={l3RightWidth} onChange={(e)=>setL3RightWidth(clamp(Number(e.target.value),260,720))}/>
+                <span className="unit">px</span>
+              </>
+            )}
           </section>
 
           {/* Appearance */}
           <section className="settings-group">
             <h4>Appearance</h4>
-            <div className="row">
-              <div className="label">Frame border width</div>
-              <input type="range" min="0" max="12" step="1" value={frameW} onChange={(e)=>setFrameW(Number(e.target.value))}/>
-              <input className="num" type="number" min="0" max="12" step="1" value={frameW} onChange={(e)=>setFrameW(clamp(Number(e.target.value),0,12))}/>
-              <span className="unit">px</span>
-            </div>
-            <div className="row">
-              <div className="label">Frame border color</div>
-              <input type="color" value={frameColor} onChange={(e)=>setFrameColor(e.target.value)} />
-              <input className="field" value={frameColor} onChange={(e)=>setFrameColor(e.target.value)} style={{maxWidth:160}}/>
-            </div>
+            {row(<><div className="label">Frame border width</div><input type="range" min="0" max="12" step="1" value={frameW} onChange={(e)=>setFrameW(Number(e.target.value))}/><input className="num" type="number" min="0" max="12" step="1" value={frameW} onChange={(e)=>setFrameW(clamp(Number(e.target.value),0,12))}/><span className="unit">px</span></>)}
+            {row(<><div className="label">Frame border color</div><input type="color" value={frameColor} onChange={(e)=>setFrameColor(e.target.value)} /><input className="field" value={frameColor} onChange={(e)=>setFrameColor(e.target.value)} style={{maxWidth:160}}/></>)}
             <label>Background image URL</label>
             <input className="field" value={bgUrl} onChange={(e)=>setBgUrl(e.target.value)} placeholder="https://… (leave blank for gradient)" />
             <div className="row gap">
@@ -1463,49 +1504,32 @@ function SettingsModal(props){
           {/* Overlays */}
           <section className="settings-group">
             <h4>Overlays</h4>
-            <div className="row">
-              <div className="label">Show live metrics (viewers/likes)</div>
-              <button className={`toggle-btn ${showMetrics ? 'enabled' : 'disabled'}`} onClick={()=>setShowMetrics(v=>!v)}>{showMetrics?'ON':'OFF'}</button>
-            </div>
-            <div className="row">
-              <div className="label">Show stream title</div>
-              <button className={`toggle-btn ${showTitles ? 'enabled' : 'disabled'}`} onClick={()=>setShowTitles(v=>!v)}>{showTitles?'ON':'OFF'}</button>
-            </div>
+            {row(<><div className="label">Show live metrics (viewers/likes)</div><button className={`toggle-btn ${showMetrics ? 'enabled' : 'disabled'}`} onClick={()=>setShowMetrics(v=>!v)}>{showMetrics?'ON':'OFF'}</button></>)}
+            {row(<><div className="label">Show stream title</div><button className={`toggle-btn ${showTitles ? 'enabled' : 'disabled'}`} onClick={()=>setShowTitles(v=>!v)}>{showTitles?'ON':'OFF'}</button></>)}
           </section>
 
           {/* Playback */}
           <section className="settings-group">
             <h4>Playback</h4>
-            <div className="row">
-              <div className="label">Default quality</div>
-              <select className="field" value={defaultQuality} onChange={(e)=>setDefaultQuality(e.target.value)} style={{maxWidth:200}}>
-                {['default','hd720','hd1080','hd1440','hd2160','highres','large','medium','small']
-                  .map(q=>(<option key={q} value={q}>{prettyQuality(q)}</option>))}
-              </select>
-            </div>
+            {row(<><div className="label">Default quality</div><select className="field" value={defaultQuality} onChange={(e)=>setDefaultQuality(e.target.value)} style={{maxWidth:200}}>{['highres','hd2160','hd1440','hd1080','hd720','large','medium','small','default'].map(q=>(<option key={q} value={q}>{prettyQuality(q)}</option>))}</select></>)}
             <p className="muted">We request the selected quality from YouTube. If that rendition isn’t available, YouTube may pick the closest available.</p>
           </section>
 
           {/* YouTube Data API key */}
           <section className="settings-group">
             <h4>YouTube Data API Key</h4>
-            <p className="muted">Optional—used for titles and “Get latest live”. Stored only in your browser.</p>
+            <p className="muted">Optional — used only for live metrics. Stored locally in your browser.</p>
             <div className="row">
-              <input
-                className="field"
-                placeholder="AIza... (your API key)"
-                value={ytApiKeyOverride}
-                onChange={(e)=>setYtApiKeyOverride(e.target.value.trim())}
-              />
+              <input className="field" placeholder="AIza... (your API key)" value={ytApiKeyOverride} onChange={(e)=>setYtApiKeyOverride(e.target.value.trim())}/>
               <button className="btn" onClick={()=>setYtApiKeyOverride('')}>Clear</button>
             </div>
           </section>
 
-          {/* Keyboard Shortcuts (editor retained for power users) */}
+          {/* Keyboard Shortcuts (two bindings) */}
           <section className="settings-group">
             <h4>Keyboard Shortcuts</h4>
-            <p className="muted">Click a field and press a key. Duplicates highlight in red.</p>
-            <div className="key-grid">
+            <p className="muted">Click a field and press a key. Use “+” to add a second key. Duplicates highlight in red.</p>
+            <div className="key-grid-2">
               {[
                 ['layout1','Layout 1'],['layout2','Layout 2'],['layout3','Layout 3'],
                 ['layout4','Layout 4'],['layout5','Layout 5'],['layout6','Layout 6'],
@@ -1522,25 +1546,42 @@ function SettingsModal(props){
                 ['syncS2ToS1','S2 → S1 mark (Shift+9)'],['syncS1ToS2','S1 → S2 mark (Shift+0)'],
                 ['syncNow','Sync Now (G)'],
               ].map(([id,label])=>{
-                const val = keymap[id] || '';
-                const dup = val && (Array.from(Object.values(keymap)).filter(v => (v||'').toLowerCase() === val.toLowerCase()).length > 1);
+                const vals = Array.isArray(keymap[id]) ? keymap[id] : [];
+                const [k1,k2] = [vals[0]||'', vals[1]||''];
+                const dup1 = k1 && (keyCount.get(k1.toLowerCase()) > 1);
+                const dup2 = k2 && (keyCount.get(k2.toLowerCase()) > 1);
                 return (
-                  <div className="key-row" key={id}>
+                  <div className="key-row-2" key={id}>
                     <label>{label}</label>
-                    <input
-                      className={`key-input ${dup?'dup':''}`}
-                      value={val}
-                      onKeyDown={(e)=>{ e.preventDefault(); setKeymap({ ...keymap, [id]: e.key }); }}
-                      onChange={()=>{}}
-                      placeholder="Press a key"
-                    />
+                    <div className="key-inputs">
+                      <input
+                        className={`key-input ${dup1?'dup':''}`}
+                        value={k1}
+                        onKeyDown={(e)=>{ e.preventDefault(); setKeyAt(id,0,e.key); }}
+                        onChange={()=>{}}
+                        placeholder="Press a key"
+                      />
+                      {vals.length>1 ? (
+                        <>
+                          <input
+                            className={`key-input ${dup2?'dup':''}`}
+                            value={k2}
+                            onKeyDown={(e)=>{ e.preventDefault(); setKeyAt(id,1,e.key); }}
+                            onChange={()=>{}}
+                            placeholder="2nd key"
+                          />
+                          <button className="btn sm" onClick={()=>removeKeyAt(id,1)}>×</button>
+                        </>
+                      ) : (
+                        <button className="btn sm" onClick={()=>addSecondKey(id)}>+</button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
             <div className="row gap">
-              <button className="btn" onClick={resetKeymap}>Reset Keybinds</button>
-              <span className="muted">Duplicates in use: {Array.from(keyCount.values()).filter(n=>n>1).length}</span>
+              <span className="muted">Duplicate keys in use: {Array.from(keyCount.values()).filter(n=>n>1).length}</span>
             </div>
           </section>
 

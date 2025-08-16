@@ -1,70 +1,108 @@
-# Getting Started with Create React App
+# Multi‑Stream Player Pro
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Two YouTube streams, clean layouts, precise sync, resilient overlays, and keyboard‑driven control — all optimized for low‑end devices.
 
-## Available Scripts
+## Highlights
 
-In the project directory, you can run:
+- **Two independent streams** with six flexible layouts
+  - **Layout 4: Picture‑in‑Picture** — drag & resize; hold **Shift** to lock 16:9
+  - **Layout 2/3:** built‑in YouTube chat (switchable Stream 1/2)
+- **Audio focus** controls (S1 / Both / S2), per‑stream volume, instant mute/unmute
+- **Markers & Sync**: set markers on either stream and jump/sync instantly
+- **Accurate drift & “Behind live”** meter
+- **Titles & live metrics** overlays  
+  - Titles work **without** an API key  
+  - Add a YouTube Data API key in **Settings** to see viewers/likes
+- **Quality control** with persistent **Highest** default
+- **Keyboard shortcuts** (global, robust) — **two bindings per action**
+- **Theme & appearance**: background image or gradient, frame border width/color, theme presets
+- **Shareable URLs**, optionally including sync target/direction
+- **Low‑end friendly**: minimal layout thrash, guarded observers, lightweight polling
 
-### `npm start`
+---
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+## Getting Started
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+1. Paste a **primary** YouTube link/ID (required) and an optional **secondary** one on the landing page.
+2. Click **Play**. Use the top bar to switch layouts (**1–6**) or toggle chat (Layout 3).
+3. Use the bottom **Quickbar** for audio focus, volumes, markers/sync, overlays, and quality.
+4. Open **Settings** (⚙️) to customize layout sizes, theme, shortcuts, and more.
+5. Click **Copy Share URL** to share your current stream setup (plus sync if you choose).
 
-### `npm test`
+---
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## Keyboard Shortcuts (default)
 
-### `npm run build`
+> All shortcuts can have **two** bindings — edit them in **Settings → Keyboard Shortcuts**.
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+- **1–6:** Switch layouts
+- **Q:** Swap streams
+- **A:** Focus audio (S1 → Both → S2)
+- **[ / ]:** Seek −10s / +10s (focused streams)
+- **M / U:** Mute / Unmute
+- **C:** Toggle chat or switch chat tab (Layout 3)
+- **I:** Toggle titles + metrics overlays
+- **9 / 0:** Set S1 / S2 marker
+- **Shift+9 / Shift+0:** Sync **S2 → S1** / **S1 → S2**
+- **G:** Sync now
+- **O:** Open Settings
+- **S:** Toggle shortcuts on/off
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+> Shortcuts are disabled while typing in an input/select/textarea field.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+---
 
-### `npm run eject`
+## Quality Controls
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+- Default quality is **Highest** — requested repeatedly to overcome YouTube’s auto quality algorithm.
+- Per‑stream quality can be set from the Quickbar. If a rendition isn’t available, YouTube chooses the closest.
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+---
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+## Titles & Metrics
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+- **Titles** are fetched without any API key (via public oEmbed/noembed).
+- **Metrics** (viewers/likes) require a YouTube Data API key (paste in **Settings**). Your key is stored only in your browser.
 
-## Learn More
+---
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## “Behind Live” Indicator
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+YouTube’s IFrame API doesn’t expose live latency.  
+We approximate it by tracking the highest time we’ve seen (“live head”) and showing `head - current`.  
+This removes the previous constant `-600s` issue and gives a stable, useful signal.
 
-### Code Splitting
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+## Performance Notes
 
-### Analyzing the Bundle Size
+- Player iframes are **never rebuilt** for simple UI changes like volume or quality selection.
+- Careful dependency reduction, guarded `ResizeObserver`, and lightweight timers keep the app smooth even on low‑end devices.
+- The UI avoids layout thrashing with staged measurements and CSS‑driven transitions.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+---
 
-### Making a Progressive Web App
+## Privacy
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+- Everything is stored **locally** in your browser (streams, settings, keybinds, theme presets, optionally your API key).
+- No backend, no tracking.
 
-### Advanced Configuration
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Development
 
-### Deployment
+- React + IFrame API.  
+- Environment variable `REACT_APP_YT_API_KEY` can supply a default API key (user can override/reset in Settings).
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+### Scripts
 
-### `npm run build` fails to minify
+- `npm start` – run locally
+- `npm run build` – production build
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+---
+
+## Credits
+
+- Made by **Vat5aL**  
+- Background visuals & UI polishing inspired by modern broadcast dashboards.
+
