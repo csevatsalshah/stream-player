@@ -10,6 +10,8 @@ const DEFAULT_L3_S2H  = 240;      // Layout 3 Stream 2 height (px)
 const DEFAULT_L3_RIGHT_W = 360;   // Layout 3 right column width (px)
 const METRICS_MS = 30000;         // 30s metrics polling
 const DRIFT_MS = 500;             // drift meter interval
+const DEFAULT_BG =
+  'https://media.discordapp.net/attachments/952501333179662338/1405875409681121280/background-stream.png?ex=68a06b01&is=689f1981&hm=854645e9229bf3a556a5be242c97c630eb27cfd8e81b8a205ee7099cd66b4bf6&=&format=webp&quality=lossless&width=1240&height=698';
 
 // Optional env key (user can override in Settings)
 const YT_API_KEY_DEFAULT = process.env.REACT_APP_YT_API_KEY || '';
@@ -26,10 +28,8 @@ function loadYouTubeAPI() {
 }
 
 /* --------- Free title/thumb (no API key) ---------- */
-/* Prefer noembed (thumbnail_url), then fallback to YouTube oEmbed, then i.ytimg */
 async function fetchTitleThumbNoKey(videoId){
   const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  // Try noembed first
   try {
     const res = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(ytUrl)}`);
     if (res.ok) {
@@ -39,7 +39,6 @@ async function fetchTitleThumbNoKey(videoId){
       return { title, thumb };
     }
   } catch {}
-  // Fallback: YouTube oEmbed (title only, craft thumb)
   try {
     const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(ytUrl)}&format=json`;
     const res = await fetch(url, { mode:'cors' });
@@ -51,7 +50,6 @@ async function fetchTitleThumbNoKey(videoId){
       };
     }
   } catch {}
-  // Last resort
   return {
     title: 'YouTube Video',
     thumb: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
@@ -127,27 +125,22 @@ const DEFAULT_KEYMAP = {
   unmuteAll:'u',
   nudgeBack:'[',
   nudgeForward:']',
-  toggleChat:'c',            // Layout 3 chat toggle OR tab switch
+  toggleChat:'c',            // Layout 3 chat toggle OR chat tab switch
   toggleInfo:'i',            // toggle titles + metrics
-  // Layout 2 chat width
-  chatWidthDec:',',
-  chatWidthInc:'.',
-  // Layout 3 sizes
-  s2HeightDec:'ArrowDown',
+  chatWidthDec:',',          // Layout 2 chat width –
+  chatWidthInc:'.',          // Layout 2 chat width +
+  s2HeightDec:'ArrowDown',   // Layout 3 sizes
   s2HeightInc:'ArrowUp',
   l3RightDec:'-',
   l3RightInc:'=',
-  // Frame border
   borderDec:'ArrowLeft',
   borderInc:'ArrowRight',
-  // Markers & sync
   setMarkS1:'9',
   setMarkS2:'0',
   syncS2ToS1:'(' /* Shift+9 */,
   syncS1ToS2:')' /* Shift+0 */,
   syncNow:'g',
 };
-const norm = (k) => (k || '').toLowerCase();
 
 /* Quality helpers */
 const QUALITY_LABELS = {
@@ -169,7 +162,7 @@ const prettyQuality = (q) => QUALITY_LABELS[q] || q || 'Auto';
 const cursorForDir = (dir) => ({
   top: 'n-resize', bottom:'s-resize', left:'w-resize', right:'e-resize',
   topRight:'ne-resize', topLeft:'nw-resize', bottomRight:'se-resize', bottomLeft:'sw-resize',
-  n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
+  n:'n-resize', s:'s-resize', e:'e-resize', w:'e-resize', ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
 }[dir] || 'default');
 
 /* ================================================== */
@@ -192,8 +185,11 @@ export default function App() {
   const [layout, setLayout] = useState(() => lsGet('ms_layout', 3)); // default to layout 3
   const [swap, setSwap] = useState(() => lsGet('ms_swap',false));
   const [shortcutsEnabled, setShortcutsEnabled] = useState(() => lsGet('ms_shortcuts_enabled',true));
-  const [menuVisible, setMenuVisible] = useState(true);                 // auto-hide secondary bars
-  const [controlsEnabled, setControlsEnabled] = useState(() => lsGet('ms_controls_enabled', true)); // bottom controls toggle
+  const [controlsEnabled, setControlsEnabled] = useState(() => lsGet('ms_controls_enabled', true));
+
+  // Draggable bars positions
+  const [topBarPos, setTopBarPos] = useState(() => lsGet('ms_topbar_pos', {x:0,y:0}));
+  const [bottomBarPos, setBottomBarPos] = useState(() => lsGet('ms_bottombar_pos', {x:0,y:0}));
 
   /* Sizes */
   const [l2ChatWidth, setL2ChatWidth] = useState(() => lsGet('ms_l2_chat', DEFAULT_L2_CHAT));
@@ -207,14 +203,14 @@ export default function App() {
   const [shield, setShield] = useState({ active:false, cursor:'default' });
 
   /* Theme / Appearance */
-  const [bgUrl, setBgUrl] = useState(() => lsGet('ms_bg', ''));
+  const [bgUrl, setBgUrl] = useState(() => lsGet('ms_bg', DEFAULT_BG));
   const [frameW, setFrameW] = useState(() => lsGet('ms_frame_w', 0));
   const [frameColor, setFrameColor] = useState(() => lsGet('ms_frame_c', '#ffffff'));
   const [themes, setThemes] = useState(() => lsGet('ms_theme_presets', []));
 
   /* Overlays */
   const [showMetrics, setShowMetrics] = useState(() => lsGet('ms_show_metrics', true));
-  const [showTitles, setShowTitles]   = useState(() => lsGet('ms_show_titles', true)); // default ON now
+  const [showTitles, setShowTitles]   = useState(() => lsGet('ms_show_titles', true));
 
   /* Settings modal */
   const [showSettings, setShowSettings] = useState(false);
@@ -244,8 +240,15 @@ export default function App() {
   const yt2 = useRef(null);
   const [ytReady, setYtReady] = useState(false);
 
-  /* Keymap */
-  const [keymap, setKeymap] = useState(() => ({ ...DEFAULT_KEYMAP, ...lsGet('ms_keymap', {}) }));
+  /* Keymap (sanitize) */
+  const [keymap, setKeymap] = useState(() => {
+    const stored = lsGet('ms_keymap', {});
+    const safe = (stored && typeof stored === 'object') ? stored : {};
+    const clean = Object.fromEntries(
+      Object.entries(safe).filter(([,v]) => typeof v === 'string' && v.trim().length)
+    );
+    return { ...DEFAULT_KEYMAP, ...clean };
+  });
 
   /* Audio */
   const [focus, setFocus] = useState('both'); // 's1' | 'both' | 's2'
@@ -253,22 +256,24 @@ export default function App() {
   const [vol2, setVol2] = useState(() => lsGet('ms_vol2', 100));
   const [muted1, setMuted1] = useState(() => lsGet('ms_muted1', false));
   const [muted2, setMuted2] = useState(() => lsGet('ms_muted2', false));
-  const [audioActive, setAudioActive] = useState(false); // set true after first user gesture so unMute is allowed
+  const [audioActive, setAudioActive] = useState(false);
 
   /* Playback quality */
   const [defaultQuality, setDefaultQuality] = useState(() => lsGet('ms_default_quality', PREFERRED_DEFAULT_QUALITY));
   const [q1, setQ1] = useState(() => lsGet('ms_q1', 'default'));
   const [q2, setQ2] = useState(() => lsGet('ms_q2', 'default'));
 
-  /* Markers & drift */
-  const [markS1, setMarkS1] = useState(null); // seconds
-  const [markS2, setMarkS2] = useState(null); // seconds
-  const [drift, setDrift] = useState(0);      // S1 - S2 seconds (live readout)
-  const [syncTarget, setSyncTarget] = useState(0); // desired drift on Sync Now (seconds)
-  const [syncMove, setSyncMove] = useState('auto'); // 'auto' | 's2' | 's1'
+  /* Markers & drift & live behind */
+  const [markS1, setMarkS1] = useState(null);
+  const [markS2, setMarkS2] = useState(null);
+  const [drift, setDrift] = useState(0); // S1 - S2
+  const [syncTarget, setSyncTarget] = useState(0);
+  const [syncMove, setSyncMove] = useState('auto'); // 'auto'|'s2'|'s1'
+  const [behind1, setBehind1] = useState(0);
+  const [behind2, setBehind2] = useState(0);
 
   /* History (24h) */
-  const [history, setHistory] = useState(() => lsGet('ms_hist', [])); // [{id,title,thumb,ts}]
+  const [history, setHistory] = useState(() => lsGet('ms_hist', []));
 
   /* Info (metrics + title) */
   const info1 = useYouTubeInfo(s1, { metricsEnabled: showMetrics, titleEnabled: showTitles, apiKey: ytApiKey });
@@ -308,7 +313,7 @@ export default function App() {
       yt1.current = new window.YT.Player(p1Ref.current, {
         events: { onReady: (e) => {
           try {
-            e.target.mute(); // start muted (autoplay)
+            e.target.mute();
             e.target.setVolume(vol1);
             e.target.playVideo();
             assertQuality(yt1, defaultQuality);
@@ -349,6 +354,7 @@ export default function App() {
       assertQuality(yt1, defaultQuality);
     } catch {} }
   }, [s1, s1Enabled, defaultQuality, vol1, assertQuality]);
+
   useEffect(() => {
     if (yt2.current && s2Enabled && s2) { try {
       yt2.current.loadVideoById(s2);
@@ -389,14 +395,8 @@ export default function App() {
   useEffect(()=>lsSet('ms_chatTab', chatTab),[chatTab]);
   useEffect(()=>lsSet('ms_hist', history),[history]);
   useEffect(()=>lsSet('ms_l3_chat_visible', chatVisibleL3),[chatVisibleL3]);
-
-  /* ---- Auto-hide secondary bars ---- */
-  useEffect(() => {
-    const a = stageRef.current || document.body; let t;
-    const onMove = () => { setMenuVisible(true); clearTimeout(t); t = setTimeout(()=>setMenuVisible(false), 1800); };
-    a.addEventListener('mousemove', onMove);
-    return () => { a.removeEventListener('mousemove', onMove); clearTimeout(t); };
-  }, []);
+  useEffect(()=>lsSet('ms_topbar_pos', topBarPos),[topBarPos]);
+  useEffect(()=>lsSet('ms_bottombar_pos', bottomBarPos),[bottomBarPos]);
 
   /* ---- Robust measurement ---- */
   const measureAll = useCallback(() => {
@@ -419,14 +419,10 @@ export default function App() {
     setRectChat(rc); if (rc) lastChat.current = rc;
   }, [layout]);
 
-  const settleTick = useRef(0);
   useLayoutEffect(() => {
     measureAll();
-    settleTick.current++;
-    const my = settleTick.current;
     let frames = 0;
     function raf() {
-      if (my !== settleTick.current) return;
       measureAll();
       if (++frames < 8) requestAnimationFrame(raf);
     }
@@ -441,22 +437,28 @@ export default function App() {
     return () => ro.disconnect();
   }, [layout, measureAll]);
 
-  /* ---- URL presets (streams only) ---- */
+  /* ---- URL presets + sync params ---- */
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     const s1q = getYouTubeId(p.get('s1'));
     const s2q = getYouTubeId(p.get('s2'));
     if (s1q) { setS1(s1q); setS1Input(s1q); }
     if (s2q) { setS2(s2q); setS2Input(s2q); }
+    const d = parseFloat(p.get('d'));
+    if (!Number.isNaN(d)) setSyncTarget(d);
+    const mv = p.get('move');
+    if (['auto','s1','s2'].includes(mv)) setSyncMove(mv);
   }, []);
   useEffect(() => {
     const q = new URLSearchParams();
     if (s1) q.set('s1', s1);
     if (s2) q.set('s2', s2);
+    if (syncTarget) q.set('d', String(syncTarget));
+    if (syncMove && syncMove!=='auto') q.set('move', syncMove);
     const base = `${window.location.origin}${window.location.pathname}`;
     const url = q.toString() ? `${base}?${q}` : base;
     window.history.replaceState(null, '', url);
-  }, [s1, s2]);
+  }, [s1, s2, syncTarget, syncMove]);
 
   /* ---- Player & chat sources ---- */
   const baseParams = `autoplay=1&playsinline=1&mute=1&rel=0&enablejsapi=1&origin=${encodeURIComponent(origin)}`;
@@ -486,21 +488,9 @@ export default function App() {
   }, [muted1, muted2, focus, vol1, vol2, audioActive]);
   useEffect(() => { applyAudioStates(); }, [applyAudioStates]);
 
-  const focusS1 = useCallback(() => {
-    setFocus('s1');
-    setMuted1(false);
-    setMuted2(true);
-  }, []);
-  const focusBoth = useCallback(() => {
-    setFocus('both');
-    setMuted1(false);
-    setMuted2(false);
-  }, []);
-  const focusS2 = useCallback(() => {
-    setFocus('s2');
-    setMuted1(true);
-    setMuted2(false);
-  }, []);
+  const focusS1 = useCallback(() => { setFocus('s1'); setMuted1(false); setMuted2(true); }, []);
+  const focusBoth = useCallback(() => { setFocus('both'); setMuted1(false); setMuted2(false); }, []);
+  const focusS2 = useCallback(() => { setFocus('s2'); setMuted1(true); setMuted2(false); }, []);
 
   const muteAll = useCallback(() => { setMuted1(true); setMuted2(true); }, []);
   const unmuteAll = useCallback(() => { setMuted1(false); setMuted2(false); setFocus('both'); }, []);
@@ -514,16 +504,25 @@ export default function App() {
     });
   }, [focus]);
 
-  /* ---- Drift meter ---- */
+  /* ---- Drift meter + behind live ---- */
   useEffect(() => {
     let t;
     function tick() {
       try {
         const t1 = yt1.current?.getCurrentTime?.();
         const t2 = yt2.current?.getCurrentTime?.();
-        if (typeof t1 === 'number' && typeof t2 === 'number') {
-          setDrift((t1 - t2));
-        }
+        if (typeof t1 === 'number' && typeof t2 === 'number') setDrift((t1 - t2));
+        // behind live (approx): duration - current time (cap 10m for sanity)
+        const d1 = yt1.current?.getDuration?.(); 
+        const d2 = yt2.current?.getDuration?.();
+        if (typeof d1 === 'number' && typeof t1 === 'number' && d1 > 0) {
+          const b1 = Math.max(0, Math.min(600, d1 - t1));
+          setBehind1(b1);
+        } else setBehind1(0);
+        if (typeof d2 === 'number' && typeof t2 === 'number' && d2 > 0) {
+          const b2 = Math.max(0, Math.min(600, d2 - t2));
+          setBehind2(b2);
+        } else setBehind2(0);
       } catch {}
       t = setTimeout(tick, DRIFT_MS);
     }
@@ -576,109 +575,81 @@ export default function App() {
     }
   }, [syncMove, syncTarget]);
 
-  /* ---- Shortcuts (optional) ---- */
-  useEffect(() => {
-    const onKey = (e) => {
-      const tag = e.target?.tagName?.toLowerCase();
-      const type = (e.target?.type || '').toLowerCase();
-      const isKeybindField = e.target?.classList?.contains('key-input');
-      const isTypingContext =
-        tag === 'textarea' ||
-        (tag === 'input' && !['range','checkbox','color','button','submit'].includes(type)) ||
-        isKeybindField;
-      if (isTypingContext) return;
+  /* ---- History helpers (24h) ---- */
+  const pruneHistory = useCallback((arr) => {
+    const now = Date.now();
+    return (arr || []).filter(x => (now - (x.ts||0)) < 24*3600*1000);
+  }, []);
+  useEffect(() => { setHistory(h => pruneHistory(h)); }, [pruneHistory]);
 
-      const k = e.key;
+  const addToHistory = (id, title, thumb) => {
+    if (!id) return;
+    setHistory(h => {
+      const base = pruneHistory(h || []);
+      const rest = base.filter(x => x.id !== id);
+      return [{ id, title: title || id, thumb: thumb || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, ts: Date.now() }, ...rest].slice(0, 40);
+    });
+  };
+  const removeHistItem = (id) => setHistory(h => (h||[]).filter(x => x.id !== id));
+  const clearHistory = () => setHistory([]);
 
-      if (norm(k) === norm(keymap.toggleShortcuts)) { e.preventDefault(); setShortcutsEnabled(v=>!v); return; }
-      if (!shortcutsEnabled) return;
+  /* ---- Latest live by channel (requires API key) ---- */
+  const [liveLookup, setLiveLookup] = useState('');
+  const [liveResult, setLiveResult] = useState(null);
 
-      const stop = () => { e.preventDefault(); e.stopPropagation(); };
-
-      if (norm(k) === norm(keymap.openSettings)) { stop(); setShowSettings(true); }
-      else if (norm(k) === norm(keymap.swap)) { stop(); setSwap(v=>!v); }
-      else if (norm(k) === norm(keymap.focusAudio)) { stop(); setFocus(f => (f==='s1' ? 'both' : f==='both' ? 's2' : 's1')); }
-      else if (norm(k) === norm(keymap.muteAll)) { stop(); muteAll(); }
-      else if (norm(k) === norm(keymap.unmuteAll)) { stop(); unmuteAll(); }
-      else if (norm(k) === norm(keymap.nudgeBack)) { stop(); nudge(-10); }
-      else if (norm(k) === norm(keymap.nudgeForward)) { stop(); nudge(10); }
-      else if (norm(k) === norm(keymap.toggleChat)) {
-        stop();
-        if (layout === 3) setChatVisibleL3(v=>!v); else setChatTab(t => (t === 1 ? 2 : 1));
+  const parseChannelFromUrlOrText = (q) => {
+    const str = q.trim();
+    if (!str) return { type:'empty' };
+    try {
+      const u = new URL(str);
+      if (u.hostname.includes('youtube.com')) {
+        const parts = u.pathname.split('/').filter(Boolean);
+        if (parts[0] === 'channel' && parts[1]?.startsWith('UC')) return { type:'channelId', value: parts[1] };
+        if (parts[0]?.startsWith('@')) return { type:'handle', value: parts[0] };
+        return { type:'text', value: str };
       }
-      else if (norm(k) === norm(keymap.toggleInfo)) {
-        stop(); const anyOn = showMetrics || showTitles; setShowMetrics(!anyOn); setShowTitles(!anyOn);
-      }
-      // Layout 2 chat width
-      else if (norm(k) === norm(keymap.chatWidthDec)) { stop(); setL2ChatWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); }
-      else if (norm(k) === norm(keymap.chatWidthInc)) { stop(); setL2ChatWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); }
-      // Layout 3 adjustments
-      else if (k === keymap.s2HeightDec) { stop(); setL3S2Height(v=>clamp(v-12,120,800)); requestAnimationFrame(measureAll); }
-      else if (k === keymap.s2HeightInc) { stop(); setL3S2Height(v=>clamp(v+12,120,800)); requestAnimationFrame(measureAll); }
-      else if (norm(k) === norm(keymap.l3RightDec)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v-12,260,720)); requestAnimationFrame(measureAll); } }
-      else if (norm(k) === norm(keymap.l3RightInc)) { stop(); if (layout===3) { setL3RightWidth(v=>clamp(v+12,260,720)); requestAnimationFrame(measureAll); } }
-      // Frame border
-      else if (k === keymap.borderDec) { stop(); setFrameW(v=>clamp(v-1,0,12)); }
-      else if (k === keymap.borderInc) { stop(); setFrameW(v=>clamp(v+1,0,12)); }
-      // Markers & sync
-      else if (norm(k) === norm(keymap.setMarkS1)) { stop(); setMarkerS1(); }
-      else if (norm(k) === norm(keymap.setMarkS2)) { stop(); setMarkerS2(); }
-      else if (norm(k) === norm(keymap.syncS2ToS1)) { stop(); syncS2ToS1Mark(); }
-      else if (norm(k) === norm(keymap.syncS1ToS2)) { stop(); syncS1ToS2Mark(); }
-      else if (norm(k) === norm(keymap.syncNow)) { stop(); syncNow(); }
-      // Layouts
-      else if (norm(k) === norm(keymap.layout1)) setLayout(1);
-      else if (norm(k) === norm(keymap.layout2)) setLayout(2);
-      else if (norm(k) === norm(keymap.layout3)) setLayout(3);
-      else if (norm(k) === norm(keymap.layout4)) setLayout(4);
-      else if (norm(k) === norm(keymap.layout5)) setLayout(5);
-      else if (norm(k) === norm(keymap.layout6)) setLayout(6);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [
-    keymap, shortcutsEnabled, muteAll, unmuteAll, nudge, layout,
-    showMetrics, showTitles, measureAll, syncNow, syncS1ToS2Mark, syncS2ToS1Mark,
-    setMarkerS1, setMarkerS2
-  ]);
-
-  /* ---- Clickability ---- */
-  const playerPointer = shortcutsEnabled ? 'none' : 'auto';
-
-  /* ---- Pick targets & visibility flags ---- */
-  const rectPip = { left: pip.x, top: pip.y, width: pip.width, height: pip.height };
-  let tgt1 = null, tgt2 = null;
-  let vis1 = false, vis2 = false;
-  let pipIsP1 = false, pipIsP2 = false;
-
-  switch (layout) {
-    case 1: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = null;           vis2 = false; break;
-    case 2: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = null;           vis2 = false; break;
-    case 3: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
-    case 4:
-      if (!swap) { tgt1 = rectS1 || lastS1.current; vis1 = true; tgt2 = rectPip; vis2 = true; pipIsP2 = true; }
-      else       { tgt1 = rectPip; vis1 = true; pipIsP1 = true; tgt2 = rectS1 || lastS1.current; vis2 = true; }
-      break;
-    case 5: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
-    case 6: tgt1 = null;                      vis1 = false; tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
-    default: break;
-  }
-  if (layout !== 4 && (layout === 3 || layout === 5) && swap) [tgt1, tgt2, vis1, vis2] = [tgt2, tgt1, vis2, vis1];
-
-  const styleFromRect = (rect, keepRef, allowFallback) => {
-    let rr = rect;
-    if (!rr && allowFallback) rr = keepRef?.current;
-    if (rr) {
-      if (rect && keepRef) keepRef.current = rect;
-      return { left: rr.left, top: rr.top, width: rr.width, height: rr.height, visibility:'visible', transform:'translateZ(0)' };
-    }
-    return { visibility:'hidden', left:-9999, top:-9999, width:1, height:1 };
+    } catch {}
+    if (str.startsWith('UC') && str.length >= 20) return { type:'channelId', value: str };
+    if (str.startsWith('@')) return { type:'handle', value: str };
+    return { type:'text', value: str };
   };
 
-  const s1Style = styleFromRect(tgt1, lastS1, vis1);
-  const s2Style = styleFromRect(tgt2, lastS2, vis2);
+  async function findLatestLive() {
+    try {
+      if (!ytApiKey) { alert('Add a YouTube Data API key in Settings to use this.'); return; }
+      const parsed = parseChannelFromUrlOrText(liveLookup);
+      if (parsed.type === 'empty') return;
 
-  /* ---- Actions ---- */
+      let channelId = null;
+      if (parsed.type === 'channelId') channelId = parsed.value;
+      else if (parsed.type === 'handle') {
+        const handle = parsed.value.startsWith('@') ? parsed.value : `@${parsed.value}`;
+        const url = `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${ytApiKey}`;
+        const r = await fetch(url); const j = await r.json();
+        channelId = j?.items?.[0]?.id || null;
+      } else {
+        const urlCh = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(parsed.value)}&key=${ytApiKey}`;
+        const chRes = await fetch(urlCh); const chJ = await chRes.json();
+        channelId = chJ?.items?.[0]?.id?.channelId || null;
+      }
+
+      if (!channelId) { setLiveResult({ status:'error', msg:'Channel not found' }); return; }
+
+      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&order=date&maxResults=1&key=${ytApiKey}`;
+      const res = await fetch(url); const j = await res.json();
+      const it = j?.items?.[0];
+      if (!it) { setLiveResult({ status:'no_live' }); return; }
+      const vid = it.id?.videoId || null;
+      if (!vid) { setLiveResult({ status:'no_live' }); return; }
+      const title = it.snippet?.title || 'Live';
+      const thumb = it.snippet?.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+      setLiveResult({ status:'ok', vid, title, thumb });
+    } catch {
+      setLiveResult({ status:'error', msg:'Lookup failed' });
+    }
+  }
+
+  /* ---- Toasters & actions ---- */
   const [toastMsg, setToastMsg] = useState('');
   function toast(t){ setToastMsg(t); setTimeout(()=>setToastMsg(''),1800); }
 
@@ -689,7 +660,6 @@ export default function App() {
     const id2 = getYouTubeId(s2Input);
     setS2(id2 || null); if (id2) setS2Enabled(true);
     setLayout(3); // default to layout 3
-    // add to history (title+thumb)
     try {
       const meta = await fetchTitleThumbNoKey(id1);
       addToHistory(id1, meta.title, meta.thumb);
@@ -707,11 +677,18 @@ export default function App() {
   const changeStream2 = () => addStream2();
   const removeStream2 = () => { setS2(null); setS2Input(''); setS2Enabled(false); };
 
-  const copyShare = async () => {
+  const copyShare = async (withSync=false) => {
     try {
-      const q = new URLSearchParams(); if (s1) q.set('s1', s1); if (s2) q.set('s2', s2);
+      const q = new URLSearchParams();
+      if (s1) q.set('s1', s1);
+      if (s2) q.set('s2', s2);
+      if (withSync) {
+        if (syncTarget) q.set('d', String(syncTarget));
+        if (syncMove && syncMove!=='auto') q.set('move', syncMove);
+      }
       const url = `${window.location.origin}${window.location.pathname}${q.toString() ? `?${q}`:''}`;
-      await navigator.clipboard.writeText(url); toast('Share URL copied!');
+      await navigator.clipboard.writeText(url);
+      toast(withSync ? 'Share URL (with sync) copied!' : 'Share URL copied!');
     } catch { toast('Copy failed — copy from address bar.'); }
   };
 
@@ -720,7 +697,7 @@ export default function App() {
     localStorage.removeItem('ms_stream1'); localStorage.removeItem('ms_stream2');
     window.history.replaceState(null, '', window.location.pathname);
     setShowSettings(false);
-    setMenuVisible(true);
+    setControlsEnabled(true); // keep bars visible when returning
   };
 
   const resetLayout = () => {
@@ -733,6 +710,8 @@ export default function App() {
     setMuted1(false);
     setMuted2(false);
     setChatVisibleL3(true);
+    setTopBarPos({x:0,y:0});
+    setBottomBarPos({x:0,y:0});
     requestAnimationFrame(measureAll);
     toast('Layout reset');
   };
@@ -754,99 +733,74 @@ export default function App() {
   };
   const applyThemePreset = (name) => {
     const t = themes.find(x => x.name === name); if (!t) return;
-    setBgUrl(t.bgUrl || ''); setFrameW(t.frameW ?? 0); setFrameColor(t.frameColor || '#ffffff');
+    setBgUrl(t.bgUrl || DEFAULT_BG); setFrameW(t.frameW ?? 0); setFrameColor(t.frameColor || '#ffffff');
     toast(`Theme “${name}” applied`);
   };
   const deleteThemePreset = (name) => { setThemes(themes.filter(t => t.name !== name)); };
 
-  /* ---- History (24h expiry) ---- */
-  const pruneHistory = useCallback((arr) => {
-    const now = Date.now();
-    return (arr || []).filter(x => (now - (x.ts||0)) < 24*3600*1000);
-  }, []);
-  useEffect(() => {
-    setHistory(h => pruneHistory(h));
-  }, [pruneHistory]);
-
-  const addToHistory = (id, title, thumb) => {
-    if (!id) return;
-    setHistory(h => {
-      const base = pruneHistory(h || []);
-      const rest = base.filter(x => x.id !== id);
-      return [{ id, title: title || id, thumb: thumb || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, ts: Date.now() }, ...rest].slice(0, 40);
-    });
+  /* ---- Drag handles (bars) ---- */
+  const dragRef = useRef(null);
+  const onBarHandleDown = (which) => (e) => {
+    e.preventDefault();
+    const pt = ('touches' in e) ? e.touches[0] : e;
+    dragRef.current = { which, x: pt.clientX, y: pt.clientY };
+    const onMove = (ev) => {
+      const p = ('touches' in ev) ? ev.touches[0] : ev;
+      const dx = p.clientX - dragRef.current.x;
+      const dy = p.clientY - dragRef.current.y;
+      if (dragRef.current.which === 'top') setTopBarPos(pos => ({ x: pos.x + dx, y: pos.y + dy }));
+      else setBottomBarPos(pos => ({ x: pos.x + dx, y: pos.y + dy }));
+      dragRef.current.x = p.clientX; dragRef.current.y = p.clientY;
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onMove, { passive:false });
+    document.addEventListener('touchend', onUp);
   };
 
-  /* ---- Latest live by channel (robust) ---- */
-  const [liveLookup, setLiveLookup] = useState('');
-  const [liveResult, setLiveResult] = useState(null);
-
-  const parseChannelFromUrlOrText = (q) => {
-    const str = q.trim();
-    if (!str) return { type:'empty' };
-    // Full URL cases
-    try {
-      const u = new URL(str);
-      if (u.hostname.includes('youtube.com')) {
-        const path = u.pathname;
-        const parts = path.split('/').filter(Boolean);
-        // /channel/UCxxxx
-        if (parts[0] === 'channel' && parts[1]?.startsWith('UC')) return { type:'channelId', value: parts[1] };
-        // /@handle
-        if (parts[0]?.startsWith('@')) return { type:'handle', value: parts[0] };
-        // /c/name or others -> treat as search text
-        return { type:'text', value: str };
-      }
-    } catch {}
-    // Raw channel id
-    if (str.startsWith('UC') && str.length >= 20) return { type:'channelId', value: str };
-    // @handle
-    if (str.startsWith('@')) return { type:'handle', value: str };
-    // Otherwise search text
-    return { type:'text', value: str };
-  };
-
-  async function findLatestLive() {
-    try {
-      if (!ytApiKey) { alert('Add a YouTube Data API key in Settings to use this.'); return; }
-      const parsed = parseChannelFromUrlOrText(liveLookup);
-      if (parsed.type === 'empty') return;
-
-      let channelId = null;
-      if (parsed.type === 'channelId') {
-        channelId = parsed.value;
-      } else if (parsed.type === 'handle') {
-        // Newer API supports forHandle=@xxx
-        const handle = parsed.value.startsWith('@') ? parsed.value : `@${parsed.value}`;
-        const url = `https://www.googleapis.com/youtube/v3/channels?part=id&forHandle=${encodeURIComponent(handle)}&key=${ytApiKey}`;
-        const r = await fetch(url); const j = await r.json();
-        channelId = j?.items?.[0]?.id || null;
-      } else {
-        // Search channels by text
-        const urlCh = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=channel&maxResults=1&q=${encodeURIComponent(parsed.value)}&key=${ytApiKey}`;
-        const chRes = await fetch(urlCh); const chJ = await chRes.json();
-        channelId = chJ?.items?.[0]?.id?.channelId || null;
-      }
-
-      if (!channelId) { setLiveResult({ status:'error', msg:'Channel not found' }); return; }
-
-      const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&eventType=live&type=video&order=date&maxResults=1&key=${ytApiKey}`;
-      const res = await fetch(url); const j = await res.json();
-      const it = j?.items?.[0];
-      if (!it) { setLiveResult({ status:'no_live' }); return; }
-      const vid = it.id?.videoId || null;
-      if (!vid) { setLiveResult({ status:'no_live' }); return; }
-      const title = it.snippet?.title || 'Live';
-      const thumb = it.snippet?.thumbnails?.medium?.url || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
-      setLiveResult({ status:'ok', vid, title, thumb });
-    } catch (e) {
-      setLiveResult({ status:'error', msg:'Lookup failed' });
+  /* ---------- helper fns used in JSX ---------- */
+  function styleFromRect(rect, keepRef, allowFallback) {
+    let rr = rect;
+    if (!rr && allowFallback) rr = keepRef?.current;
+    if (rr) {
+      if (rect && keepRef) keepRef.current = rect;
+      return { left: rr.left, top: rr.top, width: rr.width, height: rr.height, visibility:'visible', transform:'translateZ(0)' };
     }
+    return { visibility:'hidden', left:-9999, top:-9999, width:1, height:1 };
   }
+  function targets() {
+    const rectPip = { left: pip.x, top: pip.y, width: pip.width, height: pip.height };
+    let tgt1 = null, tgt2 = null;
+    let vis1 = false, vis2 = false;
+    let pipIsP1 = false, pipIsP2 = false;
+
+    switch (layout) {
+      case 1: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = null;           vis2 = false; break;
+      case 2: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = null;           vis2 = false; break;
+      case 3: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
+      case 4:
+        if (!swap) { tgt1 = rectS1 || lastS1.current; vis1 = true; tgt2 = rectPip; vis2 = true; pipIsP2 = true; }
+        else       { tgt1 = rectPip; vis1 = true; pipIsP1 = true; tgt2 = rectS1 || lastS1.current; vis2 = true; }
+        break;
+      case 5: tgt1 = rectS1 || lastS1.current;  vis1 = true;  tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
+      case 6: tgt1 = null;                      vis1 = false; tgt2 = rectS2 || lastS2.current; vis2 = !!tgt2; break;
+      default: break;
+    }
+    if (layout !== 4 && (layout === 3 || layout === 5) && swap) [tgt1, tgt2, vis1, vis2] = [tgt2, tgt1, vis2, vis1];
+    return { tgt1, tgt2, vis1, vis2, pipIsP1, pipIsP2 };
+  }
+  function s1StyleFrom(){ const {tgt1, vis1} = targets(); return styleFromRect(tgt1, lastS1, vis1); }
+  function s2StyleFrom(){ const {tgt2, vis2} = targets(); return styleFromRect(tgt2, lastS2, vis2); }
+  function isPipP1(){ return targets().pipIsP1; }
+  function isPipP2(){ return targets().pipIsP2; }
 
   /* ---- Render ---- */
-  const actionBarBottom = (controlsEnabled && menuVisible) ? 100 : 12;
-
   return (
     <div className="App">
       {!s1 && (
@@ -866,10 +820,15 @@ export default function App() {
               <button className="cta" onClick={play}>Play</button>
             </div>
 
-            {/* History (24h) */}
             {!!history.length && (
               <>
-                <h4 className="section-title">Recent (24h)</h4>
+                <div className="row" style={{justifyContent:'space-between', alignItems:'baseline', marginTop:6}}>
+                  <h4 className="section-title" style={{margin:0}}>Recent (24h)</h4>
+                  <div className="row gap" style={{margin:0}}>
+                    <button className="btn" onClick={()=>setHistory(pruneHistory(history))}>Prune expired</button>
+                    <button className="btn" onClick={clearHistory}>Clear all</button>
+                  </div>
+                </div>
                 <div className="history-grid">
                   {history.map(h=>(
                     <div key={h.id} className="hist-card">
@@ -879,6 +838,7 @@ export default function App() {
                         <div className="hist-actions">
                           <button className="btn" onClick={()=>setS1Input(h.id)}>Use as S1</button>
                           <button className="btn" onClick={()=>setS2Input(h.id)}>Use as S2</button>
+                          <button className="btn" onClick={()=>removeHistItem(h.id)} title="Remove">🗑️</button>
                         </div>
                       </div>
                     </div>
@@ -887,7 +847,6 @@ export default function App() {
               </>
             )}
 
-            {/* Latest live by channel (API key required) */}
             <div className="live-lookup">
               <label>Get latest live by Channel ID / @handle / channel name (requires API key in Settings)</label>
               <div className="row gap">
@@ -937,9 +896,8 @@ export default function App() {
                 allow="autoplay; encrypted-media; picture-in-picture"
                 allowFullScreen
                 style={{
-                  ...s1Style,
-                  pointerEvents: playerPointer,
-                  ...(layout === 4 && pipIsP1 ? { border: '1px solid rgba(255,255,255,0.85)' } : null)
+                  ...s1StyleFrom(), pointerEvents: shortcutsEnabled ? 'none' : 'auto',
+                  ...(layout === 4 && isPipP1() ? { border: '1px solid rgba(255,255,255,0.85)' } : null)
                 }}
               />
             )}
@@ -952,9 +910,8 @@ export default function App() {
                 allow="autoplay; encrypted-media; picture-in-picture"
                 allowFullScreen
                 style={{
-                  ...s2Style,
-                  pointerEvents: playerPointer,
-                  ...(layout === 4 && pipIsP2 ? { border: '1px solid rgba(255,255,255,0.85)' } : null)
+                  ...s2StyleFrom(), pointerEvents: shortcutsEnabled ? 'none' : 'auto',
+                  ...(layout === 4 && isPipP2() ? { border: '1px solid rgba(255,255,255,0.85)' } : null)
                 }}
               />
             )}
@@ -1004,42 +961,55 @@ export default function App() {
             )}
           </div>
 
-          {/* Overlays: modern info cards */}
+          {/* Overlays */}
           <div className="metrics-layer">
-            {s1Style.visibility==='visible' && (showTitles || showMetrics) && (
-              <div className="info-card" style={{ left: s1Style.left + 12, top: s1Style.top + 12 }}>
+            {s1StyleFrom().visibility==='visible' && (showTitles || showMetrics) && (
+              <div className="info-card" style={{ left: (s1StyleFrom().left + 12), top: (s1StyleFrom().top + 12) }}>
                 <div className="info-row">
                   {showTitles && (info1.title ? <span className="title">{info1.title}</span> : <span className="title skeleton" />)}
                 </div>
                 {showMetrics && (
                   <div className="metric-row">
-                    <span className="chip">{info1.viewers !== null ? `👀 ${info1.viewers.toLocaleString()}` : '👀 —'}</span>
-                    <span className="chip">{info1.likes   !== null ? `👍 ${info1.likes.toLocaleString()}`     : '👍 —'}</span>
+                    {ytApiKey ? (
+                      <>
+                        {info1.viewers !== null && <span className="chip">👀 {info1.viewers.toLocaleString()}</span>}
+                        {info1.likes   !== null && <span className="chip">👍 {info1.likes.toLocaleString()}</span>}
+                        {(info1.viewers===null && info1.likes===null) && <span className="chip">…</span>}
+                      </>
+                    ) : (
+                      <span className="chip">🔑 Add API key in Settings</span>
+                    )}
                   </div>
                 )}
               </div>
             )}
-            {s2Style.visibility==='visible' && (showTitles || showMetrics) && (
-              <div className="info-card" style={{ left: s2Style.left + 12, top: s2Style.top + 12 }}>
+            {s2StyleFrom().visibility==='visible' && (showTitles || showMetrics) && (
+              <div className="info-card" style={{ left: (s2StyleFrom().left + 12), top: (s2StyleFrom().top + 12) }}>
                 <div className="info-row">
                   {showTitles && (info2.title ? <span className="title">{info2.title}</span> : <span className="title skeleton" />)}
                 </div>
                 {showMetrics && (
                   <div className="metric-row">
-                    <span className="chip">{info2.viewers !== null ? `👀 ${info2.viewers.toLocaleString()}` : '👀 —'}</span>
-                    <span className="chip">{info2.likes   !== null ? `👍 ${info2.likes.toLocaleString()}`     : '👍 —'}</span>
+                    {ytApiKey ? (
+                      <>
+                        {info2.viewers !== null && <span className="chip">👀 {info2.viewers.toLocaleString()}</span>}
+                        {info2.likes   !== null && <span className="chip">👍 {info2.likes.toLocaleString()}</span>}
+                        {(info2.viewers===null && info2.likes===null) && <span className="chip">…</span>}
+                      </>
+                    ) : (
+                      <span className="chip">🔑 Add API key in Settings</span>
+                    )}
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* UI layer: slots, chat, controls */}
+          {/* UI layer */}
           <div className="ui-layer">
-            {/* Interaction shield to block iframes during drag/resize */}
             <div className={`interaction-shield ${shield.active ? 'show' : ''}`} style={{ cursor: shield.cursor }} />
 
-            {/* Layout content (slots & chat holders) */}
+            {/* Layout slots & chat */}
             {(() => {
               switch (layout) {
                 case 1:
@@ -1048,7 +1018,7 @@ export default function App() {
                   return (
                     <div className="layout layout-2" style={{ gridTemplateColumns:`1fr 8px ${l2ChatWidth}px` }}>
                       <div className="slot slot-s1" ref={slotS1} />
-                      <div /> {/* spacer */}
+                      <div />
                       <div className="chat-panel"><div className="chat-slot" ref={chatSlot} /></div>
                     </div>
                   );
@@ -1064,7 +1034,7 @@ export default function App() {
                       >
                         <div
                           className="slot-wrap"
-                          style={chatVisibleL3 ? undefined : { display:'flex', alignItems:'center' }}  // center S2 vertically when chat hidden
+                          style={chatVisibleL3 ? undefined : { display:'flex', alignItems:'center' }}
                         >
                           <div className={`slot slot-s2 fill ${s2 ? 'transparent' : ''}`} ref={slotS2} />
                           {!s2 && <button className="add-stream-tile" onClick={addStream2}>+</button>}
@@ -1083,11 +1053,7 @@ export default function App() {
                     </div>
                   );
                 case 4:
-                  return (
-                    <div className="layout layout-4">
-                      <div className="slot slot-s1" ref={slotS1} />
-                    </div>
-                  );
+                  return (<div className="layout layout-4"><div className="slot slot-s1" ref={slotS1} /></div>);
                 case 5:
                   return (
                     <div className="layout layout-5">
@@ -1116,13 +1082,11 @@ export default function App() {
               }
             })()}
 
-            {/* Chat (mounted once, positioned over .chat-slot) */}
+            {/* Chat frames */}
             <div className="chat-layer">
               {chat1Src && (
                 <iframe
-                  className={`chat-frame-abs ${
-                    (layout===2 && !!s1) || (layout===3 && chatVisibleL3 && chatTab===1) ? 'show' : 'hide'
-                  }`}
+                  className={`chat-frame-abs ${ (layout===2 && !!s1) || (layout===3 && chatVisibleL3 && chatTab===1) ? 'show' : 'hide' }`}
                   title="Stream 1 Chat"
                   src={chat1Src}
                   allow="autoplay; encrypted-media; picture-in-picture"
@@ -1132,9 +1096,7 @@ export default function App() {
               )}
               {chat2Src && (
                 <iframe
-                  className={`chat-frame-abs ${
-                    (layout===2 && false) || (layout===3 && chatVisibleL3 && chatTab===2) ? 'show' : 'hide'
-                  }`}
+                  className={`chat-frame-abs ${ (layout===2 && false) || (layout===3 && chatVisibleL3 && chatTab===2) ? 'show' : 'hide' }`}
                   title="Stream 2 Chat"
                   src={chat2Src}
                   allow="autoplay; encrypted-media; picture-in-picture"
@@ -1144,136 +1106,131 @@ export default function App() {
               )}
             </div>
 
-            {/* ===== Top bar (ALWAYS visible): Layouts + Settings ===== */}
-            <div className="layout-menu visible" style={{zIndex: 10}}>
+            {/* ===== Top bar (Layouts + toggles) – draggable ===== */}
+            <div
+              className="layout-menu visible"
+              style={{
+                top: 12 + topBarPos.y,
+                left: `calc(50% + ${topBarPos.x}px)`,
+                transform: 'translateX(-50%)',
+                zIndex: 10
+              }}
+            >
+              <div className="drag-handle" onMouseDown={onBarHandleDown('top')} onTouchStart={onBarHandleDown('top')} title="Drag">⋮⋮</div>
               {[1,2,3,4,5,6].map(n=>(
                 <button key={n} onClick={()=>setLayout(n)} className={layout===n?'active':''}>{n}</button>
               ))}
               <button onClick={()=>setSwap(v=>!v)} title="Swap streams">Swap</button>
-              <button onClick={resetLayout} title="Reset splits & PIP">Reset</button>
-              <button onClick={()=>setControlsEnabled(v=>!v)} className={controlsEnabled?'active':''} title="Toggle bottom controls">Controls</button>
+              {layout===3 && (
+                <button onClick={()=>setChatVisibleL3(v=>!v)} title="Toggle chat">{chatVisibleL3 ? 'Hide chat' : 'Show chat'}</button>
+              )}
+              <button onClick={resetLayout} title="Reset splits, bars & PIP">Reset</button>
+              <button onClick={()=>setControlsEnabled(v=>!v)} className={controlsEnabled?'active':''} title="Toggle bottom bar">Controls</button>
               <button onClick={()=>setShowSettings(true)} title="Open settings">⚙️</button>
             </div>
 
-            {/* ===== Quick Action bar (BOTTOM) ===== */}
-            <div
-              className="quickbar"
-              style={{
-                bottom: actionBarBottom,
-                opacity: menuVisible ? 1 : 0
-              }}
-            >
-              {/* Focus */}
-              <div className="qb-group">
-                <span className="qb-label">Focus</span>
-                <button className={`btn ${focus==='s1'?'active':''}`} onClick={focusS1}>S1</button>
-                <button className={`btn ${focus==='both'?'active':''}`} onClick={focusBoth}>Both</button>
-                <button className={`btn ${focus==='s2'?'active':''}`} onClick={focusS2}>S2</button>
-              </div>
+            {/* ===== Bottom Quickbar (merged controls) – draggable ===== */}
+            {controlsEnabled && (
+              <div
+                className="quickbar compact"
+                style={{
+                  bottom: 12 + bottomBarPos.y,
+                  left: `calc(50% + ${bottomBarPos.x}px)`,
+                  transform: 'translateX(-50%)'
+                }}
+              >
+                <div className="drag-handle" onMouseDown={onBarHandleDown('bottom')} onTouchStart={onBarHandleDown('bottom')} title="Drag">⋮⋮</div>
 
-              {/* Audio */}
-              <div className="qb-group">
-                <span className="qb-label">Audio</span>
-                <button className="btn" onClick={muteAll}>Mute</button>
-                <button className="btn" onClick={unmuteAll}>Unmute</button>
-                <button className="btn" onClick={()=>nudge(-10)}>−10s</button>
-                <button className="btn" onClick={()=>nudge(10)}>+10s</button>
-              </div>
-
-              {/* Markers */}
-              <div className="qb-group">
-                <span className="qb-label">Markers</span>
-                <button className="btn" onClick={setMarkerS1}>Set S1</button>
-                <button className="btn" onClick={setMarkerS2}>Set S2</button>
-                <button className="btn" onClick={syncS2ToS1Mark} disabled={markS1==null}>S2 → S1</button>
-                <button className="btn" onClick={syncS1ToS2Mark} disabled={markS2==null}>S1 → S2</button>
-              </div>
-
-              {/* Sync */}
-              <div className="qb-group">
-                <span className="qb-label">Sync</span>
-                <span className="drift">Δ {(drift||0).toFixed(2)}s</span>
-                <input className="num" style={{width:84}} type="number" step="0.1" value={syncTarget} onChange={e=>setSyncTarget(Number(e.target.value))} title="Target drift (S1 - S2) after sync" />
-                <select className="field small" value={syncMove} onChange={e=>setSyncMove(e.target.value)}>
-                  <option value="auto">Auto</option>
-                  <option value="s2">Move S2</option>
-                  <option value="s1">Move S1</option>
-                </select>
-                <button className="btn" onClick={syncNow}>Sync now</button>
-                <button className="btn" onClick={goLiveS1} disabled={!s1}>S1 Live</button>
-                <button className="btn" onClick={goLiveS2} disabled={!s2}>S2 Live</button>
-              </div>
-
-              {/* View toggles */}
-              <div className="qb-group">
-                <span className="qb-label">View</span>
-                <button className={`btn ${showTitles?'active':''}`} onClick={()=>setShowTitles(v=>!v)}>Titles</button>
-                <button className={`btn ${showMetrics?'active':''}`} onClick={()=>setShowMetrics(v=>!v)}>Metrics</button>
-                {layout===3 && (
-                  <button className="btn" onClick={()=>setChatVisibleL3(v=>!v)}>{chatVisibleL3?'Hide Chat':'Show Chat'}</button>
-                )}
-              </div>
-            </div>
-
-            {/* Bottom Controls Bar (auto-hide on idle) */}
-            {(controlsEnabled && menuVisible) && (
-              <div className="bottom-controls">
-                <div className="bc-group">
-                  <div className="bc-label">Audio</div>
-                  <div className="bc-row">
-                    <span>S1</span>
-                    <input type="range" min="0" max="100" value={vol1} onChange={e=>setVol1(Number(e.target.value))} disabled={!s1Enabled || !s1}/>
-                    <button className="btn" onClick={()=>setMuted1(true)} disabled={!s1Enabled || !s1}>Mute</button>
-                    <button className="btn" onClick={()=>setMuted1(false)} disabled={!s1Enabled || !s1}>Unmute</button>
-                    <label className="switch">
-                      <input type="checkbox" checked={s1Enabled} onChange={(e)=>setS1Enabled(e.target.checked)} />
-                      <span>On</span>
-                    </label>
-                  </div>
-                  <div className="bc-row">
-                    <span>S2</span>
-                    <input type="range" min="0" max="100" value={vol2} onChange={e=>setVol2(Number(e.target.value))} disabled={!s2Enabled || !s2}/>
-                    <button className="btn" onClick={()=>setMuted2(true)} disabled={!s2Enabled || !s2}>Mute</button>
-                    <button className="btn" onClick={()=>setMuted2(false)} disabled={!s2Enabled || !s2}>Unmute</button>
-                    <label className="switch">
-                      <input type="checkbox" checked={s2Enabled} onChange={(e)=>setS2Enabled(e.target.checked)} />
-                      <span>On</span>
-                    </label>
-                  </div>
+                {/* Focus */}
+                <div className="qb-group">
+                  <span className="qb-label">Focus</span>
+                  <button className={`btn ${focus==='s1'?'active':''}`} onClick={focusS1}>S1</button>
+                  <button className={`btn ${focus==='both'?'active':''}`} onClick={focusBoth}>Both</button>
+                  <button className={`btn ${focus==='s2'?'active':''}`} onClick={focusS2}>S2</button>
                 </div>
 
-                <div className="bc-group">
-                  <div className="bc-label">Quality</div>
-                  <div className="bc-row">
-                    <span>S1</span>
-                    <select
-                      value={q1}
-                      onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ yt1.current?.setPlaybackQuality(v);}catch{} }}
-                      disabled={!s1Enabled || !s1}
-                      className="field small"
-                    >
-                      {QUALITY_ORDER.map(q => <option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>)}
-                    </select>
-                  </div>
-                  <div className="bc-row">
-                    <span>S2</span>
-                    <select
-                      value={q2}
-                      onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ yt2.current?.setPlaybackQuality(v);}catch{} }}
-                      disabled={!s2Enabled || !s2}
-                      className="field small"
-                    >
-                      {QUALITY_ORDER.map(q => <option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>)}
-                    </select>
-                  </div>
+                {/* Audio quick */}
+                <div className="qb-group">
+                  <span className="qb-label">Audio</span>
+                  <button className="btn" onClick={muteAll}>Mute</button>
+                  <button className="btn" onClick={unmuteAll}>Unmute</button>
+                  <button className="btn" onClick={()=>nudge(-10)}>−10s</button>
+                  <button className="btn" onClick={()=>nudge(10)}>+10s</button>
                 </div>
 
-                <div className="bc-group">
-                  <div className="bc-label">Stream 2</div>
-                  <div className="bc-row">
-                    <button className="btn" onClick={changeStream2}>Change</button>
-                    <button className="btn" onClick={removeStream2} disabled={!s2}>Remove</button>
-                  </div>
+                {/* Levels */}
+                <div className="qb-group slim">
+                  <span className="qb-label">Levels</span>
+                  <span className="mini">S1</span>
+                  <input type="range" min="0" max="100" value={vol1} onChange={e=>setVol1(Number(e.target.value))} disabled={!s1Enabled || !s1}/>
+                  <label className="switch"><input type="checkbox" checked={s1Enabled} onChange={(e)=>setS1Enabled(e.target.checked)} /><span>On</span></label>
+                  <span className="mini">S2</span>
+                  <input type="range" min="0" max="100" value={vol2} onChange={e=>setVol2(Number(e.target.value))} disabled={!s2Enabled || !s2}/>
+                  <label className="switch"><input type="checkbox" checked={s2Enabled} onChange={(e)=>setS2Enabled(e.target.checked)} /><span>On</span></label>
+                </div>
+
+                {/* Markers */}
+                <div className="qb-group">
+                  <span className="qb-label">Markers</span>
+                  <button className="btn" onClick={setMarkerS1}>Set S1</button>
+                  <button className="btn" onClick={setMarkerS2}>Set S2</button>
+                  <button className="btn" onClick={syncS2ToS1Mark} disabled={markS1==null}>S2 → S1</button>
+                  <button className="btn" onClick={syncS1ToS2Mark} disabled={markS2==null}>S1 → S2</button>
+                </div>
+
+                {/* Sync */}
+                <div className="qb-group wide">
+                  <span className="qb-label">Sync</span>
+                  <span className="drift">Δ {(drift||0).toFixed(2)}s</span>
+                  <input className="num" style={{width:72}} type="number" step="0.1" value={syncTarget} onChange={e=>setSyncTarget(Number(e.target.value))} title="Target drift (S1 - S2)" />
+                  <select className="field small" value={syncMove} onChange={e=>setSyncMove(e.target.value)}>
+                    <option value="auto">Auto</option>
+                    <option value="s2">Move S2</option>
+                    <option value="s1">Move S1</option>
+                  </select>
+                  <button className="btn" onClick={syncNow}>Sync now</button>
+                  <button className="btn" onClick={goLiveS1} disabled={!s1}>S1 {behind1>0?`-${behind1.toFixed(1)}s`:'0s'}</button>
+                  <button className="btn" onClick={goLiveS2} disabled={!s2}>S2 {behind2>0?`-${behind2.toFixed(1)}s`:'0s'}</button>
+                </div>
+
+                {/* View toggles */}
+                <div className="qb-group">
+                  <span className="qb-label">View</span>
+                  <button className={`btn ${showTitles?'active':''}`} onClick={()=>setShowTitles(v=>!v)}>Titles</button>
+                  <button className={`btn ${showMetrics?'active':''}`} onClick={()=>setShowMetrics(v=>!v)}>Metrics</button>
+                  {layout===3 && (
+                    <button className="btn" onClick={()=>setChatVisibleL3(v=>!v)}>{chatVisibleL3?'Hide Chat':'Show Chat'}</button>
+                  )}
+                </div>
+
+                {/* Stream 2 quick */}
+                <div className="qb-group">
+                  <span className="qb-label">S2</span>
+                  <button className="btn" onClick={changeStream2}>Change</button>
+                  <button className="btn" onClick={removeStream2} disabled={!s2}>Remove</button>
+                </div>
+
+                {/* Quality */}
+                <div className="qb-group">
+                  <span className="qb-label">Quality</span>
+                  <select
+                    value={q1}
+                    onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ yt1.current?.setPlaybackQuality(v);}catch{} }}
+                    disabled={!s1Enabled || !s1}
+                    className="field small"
+                    title="S1 quality"
+                  >
+                    {QUALITY_ORDER.map(q => <option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                  </select>
+                  <select
+                    value={q2}
+                    onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ yt2.current?.setPlaybackQuality(v);}catch{} }}
+                    disabled={!s2Enabled || !s2}
+                    className="field small"
+                    title="S2 quality"
+                  >
+                    {QUALITY_ORDER.map(q => <option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                  </select>
                 </div>
               </div>
             )}
@@ -1290,7 +1247,8 @@ export default function App() {
           // general
           shortcutsEnabled={shortcutsEnabled}
           setShortcutsEnabled={setShortcutsEnabled}
-          share={() => copyShare()}
+          share={() => copyShare(false)}
+          shareWithSync={() => copyShare(true)}
           resetLayout={resetLayout}
           // streams
           s1Input={s1Input} setS1Input={setS1Input}
@@ -1301,8 +1259,6 @@ export default function App() {
             if (!id1) { alert('Primary stream is invalid.'); return; }
             setS1(id1); setS2(id2 || null); setS1Enabled(true); if(id2) setS2Enabled(true);
             setShowSettings(false);
-            setMenuVisible(true);
-            // add to history
             try {
               const meta = await fetchTitleThumbNoKey(id1);
               addToHistory(id1, meta.title, meta.thumb);
@@ -1348,7 +1304,7 @@ function SettingsModal(props){
   const {
     close,
     // general
-    shortcutsEnabled, setShortcutsEnabled, share, resetLayout,
+    shortcutsEnabled, setShortcutsEnabled, share, shareWithSync, resetLayout,
     // streams
     s1Input, setS1Input, s2Input, setS2Input, applyStreams, clearToLanding,
     // layout sizes
@@ -1398,6 +1354,7 @@ function SettingsModal(props){
             </div>
             <div className="row gap">
               <button className="cta" onClick={share}>Copy Share URL</button>
+              <button className="btn" onClick={shareWithSync}>Copy Share + Sync</button>
               <button className="btn" onClick={resetLayout}>Reset Layout</button>
               <button className="btn" onClick={clearToLanding}>Clear & Go to Landing</button>
             </div>
@@ -1486,6 +1443,7 @@ function SettingsModal(props){
             <input className="field" value={bgUrl} onChange={(e)=>setBgUrl(e.target.value)} placeholder="https://… (leave blank for gradient)" />
             <div className="row gap">
               <input type="file" accept="image/*" onChange={(e)=>onUploadLocalBg(e.target.files?.[0])}/>
+              <button className="btn" onClick={()=>setBgUrl(DEFAULT_BG)}>Use Default</button>
               <button className="btn" onClick={()=>setBgUrl('')}>Use Gradient</button>
               <button className="btn" onClick={saveThemePreset}>Save Theme Preset</button>
             </div>
@@ -1543,7 +1501,7 @@ function SettingsModal(props){
             </div>
           </section>
 
-          {/* Keyboard Shortcuts */}
+          {/* Keyboard Shortcuts (editor retained for power users) */}
           <section className="settings-group">
             <h4>Keyboard Shortcuts</h4>
             <p className="muted">Click a field and press a key. Duplicates highlight in red.</p>
@@ -1554,7 +1512,7 @@ function SettingsModal(props){
                 ['swap','Swap Streams'],['toggleShortcuts','Toggle Shortcuts'],['openSettings','Open Settings'],
                 ['focusAudio','Focus Audio (cycle)'],['muteAll','Mute All'],['unmuteAll','Unmute All'],
                 ['nudgeBack','Seek −10s'],['nudgeForward','Seek +10s'],
-                ['toggleChat','Toggle Chat (L3) / Chat Tab (L3)'],
+                ['toggleChat','Toggle Chat (L3)/Tab'],
                 ['toggleInfo','Toggle Titles + Metrics'],
                 ['chatWidthDec','L2 Chat width −'],['chatWidthInc','L2 Chat width +'],
                 ['s2HeightDec','L3 S2 height −'],['s2HeightInc','L3 S2 height +'],
