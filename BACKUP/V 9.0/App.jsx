@@ -70,7 +70,7 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
     async function fetchOnce() {
       if (!videoId || (!metricsEnabled && !titleEnabled)) return;
 
-      // Titles: always try without key first (fast / resilient)
+      // Always try to populate title (even without API key)
       if (titleEnabled && !apiKey) {
         try {
           const { title } = await fetchTitleThumbNoKey(videoId);
@@ -78,7 +78,6 @@ function useYouTubeInfo(videoId, { metricsEnabled, titleEnabled, apiKey }) {
         } catch {}
       }
 
-      // If no API key OR no metrics+title asked, stop here
       if (!apiKey || (!metricsEnabled && !titleEnabled)) return;
 
       try {
@@ -317,7 +316,7 @@ export default function App() {
   }, []);
 
   /* ---- Build/destroy players depending on enable flags ----
-     IMPORTANT: Do NOT depend on vol/quality here, to avoid remounts/refetch.
+     IMPORTANT: Do NOT depend on vol/quality here, to avoid remounts.
   */
   useEffect(() => {
     if (!ytReady) return;
@@ -357,8 +356,7 @@ export default function App() {
       try { yt2.current.destroy(); } catch {}
       yt2.current = null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ytReady, s1Enabled, s2Enabled, s1, s2, assertQuality]); // deliberately NOT depending on vol/defaultQuality
+  }, [ytReady, s1Enabled, s2Enabled, s1, s2, assertQuality, vol1, vol2, defaultQuality]); // note: volume/quality used only on first ready; this effect does not destroy on change
 
   /* ---- Re-assert quality if user changes the default ---- */
   useEffect(() => {
@@ -532,12 +530,10 @@ export default function App() {
     });
   }, [focus]);
 
-  const playS1 = useCallback(()=>{ try { yt1.current?.playVideo?.(); } catch {} }, []);
-  const pauseS1 = useCallback(()=>{ try { yt1.current?.pauseVideo?.(); } catch {} }, []);
-  const playS2 = useCallback(()=>{ try { yt2.current?.playVideo?.(); } catch {} }, []);
-  const pauseS2 = useCallback(()=>{ try { yt2.current?.pauseVideo?.(); } catch {} }, []);
-
-  /* ---- Drift meter + behind live (robust & cheap) ---- */
+  /* ---- Drift meter + behind live (robust & cheap) ----
+     For live "behind", YouTube doesn't expose latency. We approximate by tracking the
+     highest time we've observed ("live head"). Behind = head - current. Capped to 10 min.
+  */
   useEffect(() => {
     let t;
     function tick() {
@@ -606,14 +602,6 @@ export default function App() {
       if (cur < desired) moveS2(); else moveS1();
     }
   }, [syncMove, syncTarget]);
-
-  const setSyncToCurrent = useCallback(() => {
-    const t1 = Number(yt1.current?.getCurrentTime?.() || 0);
-    const t2 = Number(yt2.current?.getCurrentTime?.() || 0);
-    const d = Number((t1 - t2).toFixed(2));
-    setSyncTarget(d);
-    toast(`Sync set to Δ ${d}s (S1 - S2)`);
-  }, []);
 
   /* ---- History helpers (24h) ---- */
   const pruneHistory = useCallback((arr) => {
@@ -698,11 +686,6 @@ export default function App() {
     setBottomBarPos({x:0,y:0});
     requestAnimationFrame(measureAll);
     toast('Layout reset');
-  };
-
-  const resetKeymap = () => {
-    setKeymap({ ...DEFAULT_KEYMAP });
-    toast('Keybinds reset');
   };
 
   /* ---- Theme helpers ---- */
@@ -861,16 +844,6 @@ export default function App() {
     cycleFocus, muteAll, unmuteAll, nudge
   ]);
 
-  /* Wrapper helpers for quality in Settings */
-  const applyQ1 = useCallback((v) => {
-    setQ1(v);
-    try { assertQuality(yt1, v === 'default' ? defaultQuality : v); } catch {}
-  }, [assertQuality, defaultQuality]);
-  const applyQ2 = useCallback((v) => {
-    setQ2(v);
-    try { assertQuality(yt2, v === 'default' ? defaultQuality : v); } catch {}
-  }, [assertQuality, defaultQuality]);
-
   /* ---- Render ---- */
   return (
     <div className={`App ${s1 ? 'is-playing' : 'is-landing'}`}>
@@ -926,8 +899,8 @@ export default function App() {
             <ol>
               <li>Paste two YouTube links/IDs above and click <b>Play</b>.</li>
               <li>Use the top bar to switch layouts (1–6). Layout 4 gives PIP — drag & resize it. Hold <b>Shift</b> to lock 16:9.</li>
-              <li>Bottom menu controls audio focus, markers, sync, overlays, and more.</li>
-              <li>Open <b>Settings</b> (⚙️) to change theme, sizes, quality, keybinds, and more.</li>
+              <li>Bottom bar controls audio focus, markers, sync, quality and overlays.</li>
+              <li>Open <b>Settings</b> (⚙️) to change theme, sizes, keybinds, and more.</li>
             </ol>
 
             <h3>Keyboard Shortcuts (default)</h3>
@@ -941,7 +914,7 @@ export default function App() {
               <div><b>I</b> Toggle titles + metrics</div>
               <div><b>9 / 0</b> Set S1 / S2 marker</div>
               <div><b>Shift+9 / Shift+0</b> S2→S1 / S1→S2</div>
-              <div><b>G</b> Set/Run sync</div>
+              <div><b>G</b> Sync now</div>
               <div><b>O</b> Settings, <b>S</b> Toggle shortcuts</div>
             </div>
           </div>
@@ -1109,7 +1082,7 @@ export default function App() {
                       >
                         <div
                           className="slot-wrap"
-                          style={chatVisibleL3 ? undefined : { display:'flex', alignItems:'center', justifyContent:'center' }}
+                          style={chatVisibleL3 ? undefined : { display:'flex', alignItems:'center' }}
                         >
                           <div className={`slot slot-s2 fill ${s2 ? 'transparent' : ''}`} ref={slotS2} />
                           {!s2 && <button className="add-stream-tile" onClick={addStream2}>+</button>}
@@ -1200,12 +1173,11 @@ export default function App() {
                 <button onClick={()=>setChatVisibleL3(v=>!v)} title="Toggle chat">{chatVisibleL3 ? 'Hide chat' : 'Show chat'}</button>
               )}
               <button onClick={resetLayout} title="Reset splits, bars & PIP">Reset</button>
-              <button onClick={()=>setShortcutsEnabled(v=>!v)} className={shortcutsEnabled?'active':''} title="Toggle keyboard shortcuts">⌨︎</button>
-              <button onClick={()=>setControlsEnabled(v=>!v)} className={controlsEnabled?'active':''} title="Open/close bottom menu">☰ Menu</button>
+              <button onClick={()=>setControlsEnabled(v=>!v)} className={controlsEnabled?'active':''} title="Toggle bottom bar">Controls</button>
               <button onClick={()=>setShowSettings(true)} title="Open settings">⚙️</button>
             </div>
 
-            {/* ===== Bottom Menu (Quickbar) – draggable ===== */}
+            {/* ===== Bottom Quickbar (merged controls) – draggable ===== */}
             {controlsEnabled && (
               <div
                 className="quickbar compact"
@@ -1234,7 +1206,7 @@ export default function App() {
                   <button className="btn" onClick={()=>nudge(10)}>+10s</button>
                 </div>
 
-                {/* Levels & enable */}
+                {/* Levels */}
                 <div className="qb-group slim">
                   <span className="qb-label">Levels</span>
                   <span className="mini">S1</span>
@@ -1243,15 +1215,6 @@ export default function App() {
                   <span className="mini">S2</span>
                   <input type="range" min="0" max="100" value={vol2} onChange={e=>setVol2(Number(e.target.value))} disabled={!s2Enabled || !s2}/>
                   <label className="switch"><input type="checkbox" checked={s2Enabled} onChange={(e)=>setS2Enabled(e.target.checked)} /><span>On</span></label>
-                </div>
-
-                {/* Play/Pause */}
-                <div className="qb-group">
-                  <span className="qb-label">Playback</span>
-                  <button className="btn" onClick={playS1} disabled={!s1}>Play S1</button>
-                  <button className="btn" onClick={pauseS1} disabled={!s1}>Pause S1</button>
-                  <button className="btn" onClick={playS2} disabled={!s2}>Play S2</button>
-                  <button className="btn" onClick={pauseS2} disabled={!s2}>Pause S2</button>
                 </div>
 
                 {/* Markers */}
@@ -1273,7 +1236,6 @@ export default function App() {
                     <option value="s2">Move S2</option>
                     <option value="s1">Move S1</option>
                   </select>
-                  <button className="btn" onClick={setSyncToCurrent} title="Set target to current S1−S2">Set Sync</button>
                   <button className="btn" onClick={syncNow}>Sync now</button>
                   <button className="btn" onClick={goLiveS1} disabled={!s1}>S1 {behind1>0?`-${behind1.toFixed(1)}s`:'0s'}</button>
                   <button className="btn" onClick={goLiveS2} disabled={!s2}>S2 {behind2>0?`-${behind2.toFixed(1)}s`:'0s'}</button>
@@ -1289,10 +1251,34 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Keys & toggles */}
+                {/* Stream 2 quick */}
                 <div className="qb-group">
-                  <span className="qb-label">Keys</span>
-                  <button className="btn" onClick={resetKeymap}>Reset keybinds</button>
+                  <span className="qb-label">S2</span>
+                  <button className="btn" onClick={changeStream2}>Change</button>
+                  <button className="btn" onClick={removeStream2} disabled={!s2}>Remove</button>
+                </div>
+
+                {/* Quality */}
+                <div className="qb-group">
+                  <span className="qb-label">Quality</span>
+                  <select
+                    value={q1}
+                    onChange={(e)=>{ const v=e.target.value; setQ1(v); try{ assertQuality(yt1, v==='default' ? defaultQuality : v);}catch{} }}
+                    disabled={!s1Enabled || !s1}
+                    className="field small"
+                    title="S1 quality"
+                  >
+                    {QUALITY_ORDER.map(q => <option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                  </select>
+                  <select
+                    value={q2}
+                    onChange={(e)=>{ const v=e.target.value; setQ2(v); try{ assertQuality(yt2, v==='default' ? defaultQuality : v);}catch{} }}
+                    disabled={!s2Enabled || !s2}
+                    className="field small"
+                    title="S2 quality"
+                  >
+                    {QUALITY_ORDER.map(q => <option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>)}
+                  </select>
                 </div>
               </div>
             )}
@@ -1312,7 +1298,6 @@ export default function App() {
           share={() => copyShare(false)}
           shareWithSync={() => copyShare(true)}
           resetLayout={resetLayout}
-          resetKeymap={resetKeymap}
           // streams
           s1Input={s1Input} setS1Input={setS1Input}
           s2Input={s2Input} setS2Input={setS2Input}
@@ -1332,8 +1317,6 @@ export default function App() {
             } catch {}
           }}
           clearToLanding={clearToLanding}
-          changeStream2={changeStream2}
-          removeStream2={removeStream2}
           // layout sizes
           l2ChatWidth={l2ChatWidth} setL2ChatWidth={(v)=>{ setL2ChatWidth(v); requestAnimationFrame(measureAll); }}
           l3S2Height={l3S2Height} setL3S2Height={(v)=>{ setL3S2Height(v); requestAnimationFrame(measureAll); }}
@@ -1353,14 +1336,11 @@ export default function App() {
           keymap={keymap} setKeymap={setKeymap}
           // playback
           defaultQuality={defaultQuality} setDefaultQuality={setDefaultQuality}
-          q1={q1} applyQ1={applyQ1}
-          q2={q2} applyQ2={applyQ2}
           // API key (visible & used)
           ytApiKeyOverride={ytApiKeyOverride} setYtApiKeyOverride={setYtApiKeyOverride}
           // enable flags
           s1Enabled={s1Enabled} setS1Enabled={setS1Enabled}
-  s2Enabled={s2Enabled} setS2Enabled={setS2Enabled}
-  s2={s2}
+          s2Enabled={s2Enabled} setS2Enabled={setS2Enabled}
         />
       )}
     </div>
@@ -1372,9 +1352,9 @@ function SettingsModal(props){
   const {
     close,
     // general
-    shortcutsEnabled, setShortcutsEnabled, share, shareWithSync, resetLayout, resetKeymap,
+    shortcutsEnabled, setShortcutsEnabled, share, shareWithSync, resetLayout,
     // streams
-    s1Input, setS1Input, s2Input, setS2Input, applyStreams, clearToLanding, changeStream2, removeStream2,
+    s1Input, setS1Input, s2Input, setS2Input, applyStreams, clearToLanding,
     // layout sizes
     l2ChatWidth, setL2ChatWidth, l3S2Height, setL3S2Height, l3RightWidth, setL3RightWidth,
     chatVisibleL3, setChatVisibleL3,
@@ -1386,11 +1366,11 @@ function SettingsModal(props){
     // keymap
     keymap, setKeymap,
     // playback
-    defaultQuality, setDefaultQuality, q1, applyQ1, q2, applyQ2,
+    defaultQuality, setDefaultQuality,
     // API key
     ytApiKeyOverride, setYtApiKeyOverride,
     // enable flags
-    s1Enabled, setS1Enabled, s2Enabled, setS2Enabled, s2,
+    s1Enabled, setS1Enabled, s2Enabled, setS2Enabled,
   } = props;
 
   const allKeys = useMemo(() => {
@@ -1449,7 +1429,6 @@ function SettingsModal(props){
               <button className="cta" onClick={share}>Copy Share URL</button>
               <button className="btn" onClick={shareWithSync}>Copy Share + Sync</button>
               <button className="btn" onClick={resetLayout}>Reset Layout</button>
-              <button className="btn" onClick={resetKeymap}>Reset Keybinds</button>
               <button className="btn" onClick={clearToLanding}>Clear & Go to Landing</button>
             </div>
           </section>
@@ -1464,11 +1443,7 @@ function SettingsModal(props){
             {row(<><div className="label">Stream 1 enabled</div><button className={`toggle-btn ${s1Enabled?'enabled':'disabled'}`} onClick={()=>setS1Enabled(v=>!v)}>{s1Enabled?'ON':'OFF'}</button></>)}
             {row(<><div className="label">Stream 2 enabled</div><button className={`toggle-btn ${s2Enabled?'enabled':'disabled'}`} onClick={()=>setS2Enabled(v=>!v)}>{s2Enabled?'ON':'OFF'}</button></>)}
             {row(<><div className="label">Layout 3 chat visible</div><button className={`toggle-btn ${chatVisibleL3?'enabled':'disabled'}`} onClick={()=>setChatVisibleL3(v=>!v)}>{chatVisibleL3?'ON':'OFF'}</button></>)}
-            <div className="row gap">
-              <button className="cta" onClick={applyStreams}>Apply Streams</button>
-              <button className="btn" onClick={changeStream2}>Change Stream 2</button>
-              <button className="btn" onClick={removeStream2} disabled={!s2}>Remove Stream 2</button>
-            </div>
+            <div className="row gap"><button className="cta" onClick={applyStreams}>Apply Streams</button></div>
           </section>
 
           {/* Layout */}
@@ -1538,16 +1513,6 @@ function SettingsModal(props){
             <h4>Playback</h4>
             {row(<><div className="label">Default quality</div><select className="field" value={defaultQuality} onChange={(e)=>setDefaultQuality(e.target.value)} style={{maxWidth:200}}>{['highres','hd2160','hd1440','hd1080','hd720','large','medium','small','default'].map(q=>(<option key={q} value={q}>{prettyQuality(q)}</option>))}</select></>)}
             <p className="muted">We request the selected quality from YouTube. If that rendition isn’t available, YouTube may pick the closest available.</p>
-            <div className="row gap">
-              <label className="label">S1 Quality</label>
-              <select className="field small" value={q1} onChange={(e)=>applyQ1(e.target.value)} style={{maxWidth:200}}>
-                {QUALITY_ORDER.map(q=>(<option key={`q1-${q}`} value={q}>{prettyQuality(q)}</option>))}
-              </select>
-              <label className="label">S2 Quality</label>
-              <select className="field small" value={q2} onChange={(e)=>applyQ2(e.target.value)} style={{maxWidth:200}}>
-                {QUALITY_ORDER.map(q=>(<option key={`q2-${q}`} value={q}>{prettyQuality(q)}</option>))}
-              </select>
-            </div>
           </section>
 
           {/* YouTube Data API key */}
@@ -1563,7 +1528,7 @@ function SettingsModal(props){
           {/* Keyboard Shortcuts (two bindings) */}
           <section className="settings-group">
             <h4>Keyboard Shortcuts</h4>
-            <p className="muted">Click a field and press a key. Use “+” to add a second key. Duplicates highlight in red. Use “Reset Keybinds” in General to restore defaults.</p>
+            <p className="muted">Click a field and press a key. Use “+” to add a second key. Duplicates highlight in red.</p>
             <div className="key-grid-2">
               {[
                 ['layout1','Layout 1'],['layout2','Layout 2'],['layout3','Layout 3'],
