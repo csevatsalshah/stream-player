@@ -1,310 +1,119 @@
-:root {
-  --panel: #0f1625;
-  --muted: #a3b0c2;
-  --success: #10b981;
-  --danger: #ef4444;
-  --shadow: 0 10px 30px rgba(0, 0, 0, .35);
-  --frame-w: 0px;
-  --frame-color: transparent;
-}
+# Multi‑Stream Player Pro
 
-* { box-sizing: border-box }
-html, body, #root { height: 100% }
+Dual YouTube streams, clean layouts, precise sync, resilient overlays, and keyboard‑driven control — **optimized for low‑end devices**.
 
-body {
-  margin: 0;
-  background: #0b0d12;
-  color: #e5e7eb;
-  font-family: Inter, system-ui, ui-sans-serif, Segoe UI, Roboto, Helvetica, Arial
-}
+---
 
-/* App wrapper: allow scroll on landing, lock during playback */
-.App { width: 100%; min-height: 100vh }
-.App.is-landing { overflow: auto }
-.App.is-playing { height: 100vh; overflow: hidden }
+## What’s New
 
-/* Stage */
-.stage {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: radial-gradient(70% 120% at 70% 10%, #0f172a 0%, #0b1220 50%, #060a12 100%) center/cover no-repeat fixed;
-}
+- **No refresh on volume changes** – player iframes aren’t re‑created when you adjust audio.
+- **Always‑working shortcuts** – plus a **top‑bar toggle** (⌨︎) so you can re‑enable even when hotkeys are OFF.
+- **Reliable titles + live metrics** – titles fetched without an API key; metrics (viewers/likes) with an optional key.
+- **Behind‑Live meter fixed** – accurate seconds behind live for each stream (no more stuck at `-600s`).
+- **“Sync Now” improved** + **Set Sync** – capture current `Δ (S1 − S2)` with one click, then apply.
+- **Per‑stream Play/Pause** in the bottom menu.
+- **Change/Remove Stream 2 & per‑stream quality** moved to **Settings** (cleaner quickbar).
+- **Bottom menu is a “Menu”** – open/close from top bar (☰). Draggable behavior improved.
+- **Layout 3 center alignment when chat hidden** – video and frame borders align visually.
+- **Two keybinds per action** with a **“+”**. Added **Reset Keybinds** (Settings + quickbar).
 
-/* Layers */
-.players-layer { position: absolute; inset: 0; z-index: 1 }
-.pip-layer     { position: absolute; inset: 0; z-index: 5; pointer-events: none }
-.metrics-layer { position: absolute; inset: 0; z-index: 3; pointer-events: none }
-.ui-layer      { position: relative; z-index: 4; width: 100%; height: 100%; pointer-events: none }
+---
 
-/* Chat */
-.chat-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none }
-.chat-frame-abs {
-  position: absolute;
-  border: var(--frame-w) solid var(--frame-color);
-  width: 100%;
-  height: 100%;
-  border-radius: 12px;
-  pointer-events: auto;
-  background: #000;
-  overflow: hidden;
-}
-.chat-frame-abs.hide { opacity: 0; visibility: hidden }
-.chat-frame-abs.show { opacity: 1; visibility: visible }
+## Highlights
 
-/* Players */
-.player {
-  position: absolute;
-  border: var(--frame-w) solid var(--frame-color);
-  background: #000;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow: var(--shadow);
-  transition: left .12s ease, top .12s ease, width .12s ease, height .12s ease;
-}
-.player.no-anim { transition: none !important }
+- **Two independent streams** with six flexible layouts
+  - **Layout 4: Picture‑in‑Picture** — drag & resize; hold **Shift** to lock 16:9
+  - **Layout 2/3:** built‑in YouTube chat (switchable Stream 1/2)
+- **Audio focus** controls (S1 / Both / S2), per‑stream volume, instant mute/unmute
+- **Markers & Sync**: set markers on either stream and jump/sync instantly
+- **Accurate drift & “Behind live”** meter
+- **Titles & live metrics** overlays  
+  - Titles work **without** an API key  
+  - Add a YouTube Data API key in **Settings** to see viewers/likes
+- **Quality control** with persistent **Highest** default (override per‑stream in Settings)
+- **Keyboard shortcuts** (global, robust) — **two bindings per action**, resettable
+- **Theme & appearance**: background image or gradient, frame border width/color, theme presets
+- **Shareable URLs**, optionally including sync target/direction
+- **Low‑end friendly**: minimal layout thrash, guarded observers, lightweight polling
 
-/* Info cards */
-.info-card {
-  position: absolute;
-  background: linear-gradient(180deg, rgba(15,22,35,.78), rgba(15,22,35,.6));
-  border: 1px solid rgba(255,255,255,.09);
-  padding: 8px 10px;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35);
-  backdrop-filter: blur(8px);
-  min-width: 200px;
-}
-.info-card .info-row { margin: 0 0 4px; }
-.info-card .title {
-  font-weight: 800;
-  font-size: 13px;
-  color: #eaf0ff;
-  max-width: 44vw;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.info-card .title.skeleton {
-  display: inline-block;
-  width: 140px; height: 12px; border-radius: 6px;
-  background: linear-gradient(90deg, rgba(255,255,255,.12), rgba(255,255,255,.06), rgba(255,255,255,.12));
-  background-size: 300% 100%;
-  animation: sk 1.4s infinite;
-}
-@keyframes sk { 0%{background-position:0% 0} 100%{background-position:100% 0} }
-.info-card .metric-row { display: flex; gap: 6px; flex-wrap: wrap }
-.info-card .chip {
-  background: rgba(255,255,255,.08);
-  color: #e3e9f5;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-weight: 700;
-  font-size: 12px;
-}
+---
 
-/* Landing */
-.landing { width: 100%; display: grid; gap: 18px; padding: 24px 16px 36px; min-height: 100vh }
-.landing-hero { text-align: center }
-.landing-card {
-  width: min(980px, 92vw);
-  margin: 0 auto;
-  background: linear-gradient(160deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .03));
-  border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 20px;
-  padding: 28px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(10px);
-  color: #e5e7eb
-}
-.headline { font-size: clamp(28px, 4vw, 42px); margin: 0 0 8px }
-.headline-accent {
-  display: inline-block; margin-left: 6px; font-weight: 800;
-  background: linear-gradient(45deg, #6366f1, #06b6d4);
-  -webkit-background-clip: text; background-clip: text; color: transparent
-}
-.sub { margin: 0 0 16px; color: var(--muted) }
+## Getting Started
 
-.form { display: grid; gap: 12px; text-align: left; margin: 0 auto 14px; width: min(700px, 92%) }
-label { font-size: 13px; color: #d1d5db }
-.field {
-  width: 100%; padding: 10px 12px; border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, .14); background: rgba(16, 21, 32, .7); color: #f9fafb; outline: none
-}
-.field.primary { border-color: rgba(99, 102, 241, .65) }
-.field.small { padding: 6px 8px; font-size: 13px }
-.field::placeholder { color: #9aa4b2 }
+1. Paste a **primary** YouTube link/ID (required) and an optional **secondary** one on the landing page.
+2. Click **Play**.
+3. Use the **top bar** to switch layouts (**1–6**), toggle chat (L3), toggle shortcuts (⌨︎), open the **Menu** (☰), or open **Settings** (⚙️).
+4. Use the **Menu** (bottom quickbar) for focus, volumes, markers, sync (`Set Sync` + `Sync now`), per‑stream play/pause, overlays, and more.
+5. In **Settings**, change layout sizes, theme, **quality per stream**, Stream 2 change/remove, keybinds, and the optional API key.
+6. Click **Copy Share URL** to share your current setup (plus sync if you choose).
 
-.cta {
-  margin-top: 6px; background: linear-gradient(45deg, #6366f1, #06b6d4);
-  color: #fff; border: none; border-radius: 999px; padding: 10px 22px; cursor: pointer; font-weight: 800;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, .35)
-}
-.btn {
-  background: #1f2937; color: #e5e7eb; border: 0; border-radius: 10px; padding: 8px 10px; cursor: pointer; font-weight: 700
-}
-.btn:hover { background: #374151 }
-.btn.active { outline: 2px solid #0ea5e9 }
-.btn.sm { padding: 6px 8px; min-width: 32px }
+---
 
-.section-title { margin: 16px 0 8px }
-.history-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr));
-  gap: 12px; text-align: left
-}
-.hist-card {
-  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
-  border-radius: 12px; overflow: hidden
-}
-.hist-thumb { width: 100%; display: block; aspect-ratio: 16/9; object-fit: cover }
-.hist-meta { padding: 10px }
-.hist-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; line-height: 1.3; max-height: 34px; overflow: hidden }
-.hist-actions { display: flex; gap: 8px }
+## Keyboard Shortcuts (default)
 
-/* Guide */
-.guide { width: min(980px, 92vw); margin: 0 auto }
-.guide h3 { margin: 12px 0 8px }
-.guide ol { margin: 0 0 10px 18px }
-.kbd-grid {
-  display: grid; grid-template-columns: repeat(auto-fill,minmax(200px,1fr));
-  gap: 8px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-  padding: 10px; border-radius: 12px
-}
+> Every action supports **two** bindings — edit them in **Settings → Keyboard Shortcuts**.
 
-.made-by { margin-top:8px; text-align: center }
-.made-by-foot { text-align: right; opacity: .8 }
+- **1–6:** Switch layouts
+- **Q:** Swap streams
+- **A:** Focus audio (S1 → Both → S2)
+- **[ / ]:** Seek −10s / +10s (focused streams)
+- **M / U:** Mute / Unmute
+- **C:** Toggle chat or switch chat tab (Layout 3)
+- **I:** Toggle titles + metrics overlays
+- **9 / 0:** Set S1 / S2 marker
+- **Shift+9 / Shift+0:** Sync **S2 → S1** / **S1 → S2**
+- **G:** Sync now (you can first **Set Sync** from the bottom menu)
+- **O:** Open Settings
+- **S:** Toggle shortcuts on/off (you can also use ⌨︎ in the top bar)
 
-/* Layouts */
-.layout { width: 100%; height: 100% }
-.slot { pointer-events: none; width: 100%; height: 100%; background: transparent !important }
-.layout-1 { position: relative; min-height: 0 }
-.layout-1 .slot-s1 { position: absolute; inset: 0 }
-.layout-2 { display: grid; grid-template-rows: 100%; gap: 8px; padding: 8px; height: 100%; min-height: 0 }
-.layout-2 .slot-s1 { aspect-ratio: 16/9; align-self: center; width: 100%; height: auto }
-.chat-panel {
-  pointer-events: auto; background: var(--panel); border: 1px solid rgba(255, 255, 255, .08);
-  border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; position: relative; min-height: 0
-}
-.chat-slot { flex: 1; min-height: 0 }
-.layout-3 { display: grid; gap: 8px; padding: 8px; height: 100%; min-height: 0 }
-.layout-3 .slot-s1 { aspect-ratio: 16/9; align-self: center; width: 100%; height: auto }
-.right-col { display: grid; gap: 8px; min-height: 0 }
-.slot-wrap { position: relative; min-height: 0 }
-.slot-s2.fill { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: transparent !important }
-.add-stream-tile { pointer-events: auto; position: absolute; inset: 0; background: transparent; color: #fff; font-size: 64px; border: 0; cursor: pointer }
-.chat-toggle {
-  pointer-events: auto; display: flex; gap: 6px; padding: 6px;
-  background: #0e1522; border-bottom: 1px solid #1f2a3d
-}
-.chat-toggle button { flex: 1; padding: 8px 10px; border-radius: 8px; border: 0; cursor: pointer; background: #132033; color: #cbd5e1; font-weight: 600 }
-.chat-toggle button.active { background: #0ea5e9; color: white }
-.chat-toggle button:disabled { opacity: .5; cursor: not-allowed }
-.layout-4 { position: relative; width: 100%; height: 100% }
-.layout-4 .slot-s1 { position: absolute; inset: 0 }
+> Shortcuts are automatically disabled while typing in inputs/selects.
 
-/* PIP */
-.pip-overlay { position: absolute; z-index: 6; pointer-events: auto }
-.pip-box {
-  width: 100%; height: 100%; border: 1px solid rgba(255, 255, 255, .9); border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .35); background: transparent; position: relative;
-  pointer-events: none; transition: box-shadow .15s ease, border-color .15s ease;
-}
-.pip-overlay:hover .pip-box { box-shadow: 0 10px 28px rgba(0, 0, 0, .45); border-color: #ffffff }
-.pip-drag-handle {
-  position: absolute; left: 50%; transform: translateX(-50%); top: 6px; height: 22px; min-width: 100px;
-  display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .6); color: #fff;
-  border-radius: 999px; padding: 0 10px; font-weight: 700; cursor: move; pointer-events: auto; user-select: none; opacity: 0; transition: opacity .12s
-}
-.pip-overlay:hover .pip-drag-handle { opacity: 1 }
-.pip-handle { position: absolute; pointer-events: auto; z-index: 20; background: rgba(255,255,255,0.001); opacity: 0; transition: opacity .12s }
-.pip-overlay:hover .pip-handle { opacity: 1 }
-.pip-h-n { left:0; right:0; top:-6px; height:12px; cursor:n-resize }
-.pip-h-s { left:0; right:0; bottom:-6px; height:12px; cursor:s-resize }
-.pip-h-e { top:0; bottom:0; right:-6px; width:12px; cursor:e-resize }
-.pip-h-w { top:0; bottom:0; left:-6px; width:12px; cursor:w-resize }
-.pip-h-ne, .pip-h-se, .pip-h-sw, .pip-h-nw { width: 18px; height: 18px; border: 2px solid rgba(255, 255, 255, .85); border-radius: 3px }
-.pip-h-ne { top:-9px; right:-9px; cursor: ne-resize }
-.pip-h-se { bottom:-9px; right:-9px; cursor: se-resize }
-.pip-h-sw { bottom:-9px; left:-9px; cursor: sw-resize }
-.pip-h-nw { top:-9px; left:-9px; cursor: nw-resize }
+---
 
-/* Shield */
-.interaction-shield { position: absolute; inset: 0; z-index: 4; background: transparent }
+## Sync & Behind‑Live
 
-/* Layout 5-6 */
-.layout-5 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px; height: 100%; min-height: 0 }
-.layout-5 .slot { align-self: center; width: 100%; height: auto; aspect-ratio: 16/9 }
-.center-wrap { display: flex; align-items: center; justify-content: center }
-.layout-6 { position: relative; width: 100%; height: 100%; display: grid; place-items: center; min-height: 0 }
-.layout-6 .slot-s2 { position: absolute; inset: 0 }
-.add-stream-fullscreen { pointer-events: auto; width: 100%; height: 100%; display: grid; place-items: center; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) }
-.add-stream-content { text-align: center; color: white; text-shadow: 0 4px 24px rgba(0, 0, 0, .25) }
-.plus-icon { font-size: 84px; display: block; margin-bottom: 8px }
-.add-stream-content p { font-size: 22px; margin: 6px 0 16px }
+- **Drift (`Δ`)** shows `S1 − S2` in seconds.
+- **Set Sync** captures the current drift into the **Target** box.
+- **Sync now** applies the target using **Auto** or your selected move (move S1/S2).
+- **Behind‑live** (S1/S2 buttons) shows how many seconds that stream is behind the observed live head. Use those buttons to jump to live.
 
-/* Top layout menu (1 row) */
-.layout-menu {
-  pointer-events: auto; position: fixed;
-  background: rgba(15, 22, 35, .7); border: 1px solid rgba(255, 255, 255, .1); backdrop-filter: blur(8px);
-  padding: 4px 6px; border-radius: 10px; display: flex; gap: 6px; z-index: 10
-}
-.layout-menu button { background: #1a2435; color: #e5e7eb; border: 0; border-radius: 8px; padding: 6px 8px; cursor: pointer; font-weight: 700 }
-.layout-menu button.active { background: #334155; color: #fff }
-.drag-handle {
-  user-select: none; cursor: move; background: rgba(255,255,255,.08);
-  color: #d8e4ff; padding: 4px 8px; border-radius: 8px; font-weight: 800
-}
+---
 
-/* Bottom Quickbar (2 rows max) */
-.quickbar {
-  pointer-events: auto; position: fixed;
-  background: rgba(15, 22, 35, .72); border: 1px solid rgba(255, 255, 255, .1); backdrop-filter: blur(8px);
-  padding: 6px; border-radius: 12px; display: flex; gap: 10px; align-items: center; z-index: 11;
-  max-width: min(98vw, 1500px); flex-wrap: wrap
-}
-.quickbar.compact .btn { padding: 6px 8px }
-.qb-group {
-  display: flex; align-items: center; gap: 6px;
-  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08);
-  padding: 6px; border-radius: 10px
-}
-.qb-group.slim input[type="range"] { width: 90px }
-.qb-group.wide { flex: 1 1 auto }
-.qb-label { font-weight: 800; font-size: 12px; opacity: .85 }
-.mini { font-size: 12px; opacity: .8 }
-.drift { font-weight: 800; font-size: 12px; opacity:.9 }
+## Titles & Metrics
 
-/* Switch + small inputs */
-.switch { display: inline-flex; align-items: center; gap: 6px }
-.num {
-  width: 74px; border-radius: 8px; border: 1px solid #2a3345; background: #0b1626; color: #e5e7eb; padding: 6px 8px
-}
+- **Titles**: fetched with public oEmbed/noembed (no key required).
+- **Metrics**: viewer/like counts use the **YouTube Data API** (paste a key in Settings). Your key is stored only in your browser.
 
-/* Toast */
-.toast {
-  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
-  background: rgba(0, 0, 0, .75); color: white; padding: 10px 14px; border-radius: 10px; z-index: 100; pointer-events: none
-}
+---
 
-/* Modal */
-.modal-backdrop { pointer-events: auto; position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: grid; place-items: center; z-index: 200 }
-.modal { position: relative; width: min(820px, 92vw); background: #0f172a; color: #e5e7eb; border: 1px solid rgba(255, 255, 255, .08); border-radius: 16px; padding: 18px; box-shadow: 0 14px 40px rgba(0, 0, 0, .5) }
-.modal-wide { width: min(980px, 94vw) }
-.modal h3 { margin: 0 0 12px }
-.modal-close { position: absolute; right: 10px; top: 10px; background: #1f2937; border: 0; border-radius: 8px; color: #e5e7eb; font-weight: 800; cursor: pointer; padding: 6px 9px }
-.settings-grid { display: grid; gap: 16px; max-height: min(78vh, 720px); overflow: auto; padding-right: 6px }
-.settings-group { background: #0b1425; border: 1px solid rgba(255, 255, 255, .06); border-radius: 12px; padding: 12px }
-.settings-group h4 { margin: 0 0 10px }
-.row { display: flex; align-items: center; gap: 10px; margin: 8px 0 }
-.row.gap { gap: 12px }
-.label { min-width: 220px }
-.theme-chip { display: inline-flex; gap: 6px; align-items: center; background: #0b1626; border: 1px solid #263247; border-radius: 999px; padding: 4px 8px }
+## Performance Notes
 
-/* Keys (two bindings per row) */
-.key-grid-2 { display: grid; grid-template-columns: 1fr; gap: 10px }
-.key-row-2 label { font-size: 14px; display:block; margin-bottom: 6px }
-.key-inputs { display:flex; gap:6px; align-items:center }
-.key-input {
-  width: 160px; padding: 10px; border-radius: 8px; border: 1px solid #2a3345; background: #0b1626; color: #e5e7eb; text-align: center; font-weight: 800; letter-spacing: .4px
-}
-.key-input.dup { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, .25) }
+- Player iframes are **not rebuilt** for audio/quality UI changes.
+- Guarded `ResizeObserver`, measured updates, and small timers keep the app smooth on low‑end devices.
+- Pointer‑event layering ensures you can either use **hotkeys** or interact directly with YouTube UI when hotkeys are disabled.
 
-.muted { color: #97a0ad; font-size: 12px; margin: 6px 0 0 }
+---
+
+## Privacy
+
+- All data (streams, theme, keybinds, positions, optional API key) is stored **locally** in your browser.
+- No backend, no tracking.
+
+---
+
+## Development
+
+- React + YouTube IFrame API  
+- Environment variable: `REACT_APP_YT_API_KEY` to provide a default API key (overridable in Settings).
+
+### Scripts
+
+- `npm start` – run locally
+- `npm run build` – production build
+
+---
+
+## Credits
+
+- Made by **Vat5aL**  
+- Background & UX inspired by modern broadcast dashboards.
